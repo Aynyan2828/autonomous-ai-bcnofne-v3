@@ -1,0 +1,123 @@
+version: '3.8'
+
+x-common: &common
+  restart: unless-stopped
+  environment:
+    - TZ=Asia/Tokyo
+  volumes:
+    - ./data:/app/data
+    - ./.env:/app/.env:ro
+  networks:
+    - shipos-net
+
+services:
+  core:
+    <<: *common
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    container_name: shipos-core
+    ports:
+      - "8000:8000"
+    depends_on:
+      - billing-guard
+
+  line-gateway:
+    <<: *common
+    build:
+      context: .
+      dockerfile: line-gateway/Dockerfile
+    container_name: shipos-line-gateway
+    ports:
+      - "8001:8001"
+    depends_on:
+      - core
+
+  billing-guard:
+    <<: *common
+    build:
+      context: .
+      dockerfile: billing-guard/Dockerfile
+    container_name: shipos-billing-guard
+    ports:
+      - "8002:8002"
+
+  memory-service:
+    <<: *common
+    build:
+      context: .
+      dockerfile: memory-service/Dockerfile
+    container_name: shipos-memory-service
+    ports:
+      - "8003:8003"
+
+  diary-service:
+    <<: *common
+    build:
+      context: .
+      dockerfile: diary-service/Dockerfile
+    container_name: shipos-diary-service
+    ports:
+      - "8004:8004"
+
+  watchdog:
+    <<: *common
+    build:
+      context: .
+      dockerfile: watchdog/Dockerfile
+    container_name: shipos-watchdog
+    ports:
+      - "8005:8005"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  discord-gateway:
+    <<: *common
+    build:
+      context: .
+      dockerfile: discord-gateway/Dockerfile
+    container_name: shipos-discord-gateway
+    ports:
+      - "8006:8006"
+
+  voice-router:
+    <<: *common
+    build:
+      context: .
+      dockerfile: voice-router/Dockerfile
+    container_name: shipos-voice-router
+    ports:
+      - "8007:8007"
+
+  storage-manager:
+    <<: *common
+    build:
+      context: .
+      dockerfile: storage-manager/Dockerfile
+    container_name: shipos-storage-manager
+    ports:
+      - "8008:8008"
+
+  browser-agent:
+    <<: *common
+    build:
+      context: .
+      dockerfile: browser-agent/Dockerfile
+    container_name: shipos-browser-agent
+    ports:
+      - "8009:8009"
+
+  gui:
+    <<: *common
+    build:
+      context: .
+      dockerfile: gui/Dockerfile
+    container_name: shipos-gui
+    ports:
+      - "8010:8010"
+
+networks:
+  shipos-net:
+    driver: bridge
