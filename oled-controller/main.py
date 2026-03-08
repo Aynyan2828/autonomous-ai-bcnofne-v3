@@ -392,11 +392,11 @@ def update_oled(db: Session):
     # Line 4: Hardwares (TEMP/DISK)
     draw.text((0, 33), f"TEMP:{temp:.0f}C DISK:{disk_pct:.0f}%", font=font, fill=255)
     
-    # Line 5: Blank or status (To keep spec alignment if needed, but moving IPs to scroll)
-    draw.text((0, 44), "STATUS: ONLINE", font=font, fill=255)
+    # Line 5: Scrolling message (Includes IPs)
+    draw.text((scroll_pos, 44), scroll_message, font=font, fill=255)
     
-    # Line 6: Scrolling message (Includes IPs)
-    draw.text((scroll_pos, 55), scroll_message, font=font, fill=255)
+    # Line 6: Fixed Status
+    draw.text((0, 55), "STATUS: ONLINE", font=font, fill=255)
 
     
     # スクロール位置更新
