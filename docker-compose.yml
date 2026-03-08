@@ -9,6 +9,8 @@ x-common: &common
   volumes:
     - ./data:/app/data
     - ./.env:/app/.env:ro
+    - /mnt/ssd:/mnt/ssd
+    - /mnt/hdd:/mnt/hdd
   networks:
     - shipos-net
 
