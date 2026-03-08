@@ -18,7 +18,7 @@ from shared.logger import ShipLogger
 from shared.database import SessionLocal
 from shared.models import SystemState
 
-VERSION = "v3.1.4-debug"
+VERSION = "v3.1.5-fix"
 print(f"AYN {VERSION} STARTING... (CWD: {os.getcwd()})")
 
 logger = ShipLogger("dev-agent")

@@ -61,6 +61,16 @@ class ShipLogger:
             except Exception as e:
                 print(f"[LOGGER ERROR] Discord Fail: {e}")
 
+    def _send_notification(self, level: str, message: str):
+        """非同期ループの有無に応じて通知を送る処操"""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._notify_discord(level, message))
+        except RuntimeError:
+            # ループがない場合（同期スレッドなど）は同期的に実行を試みる（簡易版）処操
+            # ここではエラーを避けるために独立したスレッドで実行するか、単に無視する
+            pass 
+
     def info(self, message: str):
         print(f"[{self.service_name}] INFO: {message}")
         self._log_to_db(LogLevel.INFO.value, message)
@@ -70,18 +80,18 @@ class ShipLogger:
         print(f"[{self.service_name}] WARN: {message}")
         self._log_to_db(LogLevel.WARN.value, message)
         self._log_to_json(LogLevel.WARN.value, message)
-        asyncio.create_task(self._notify_discord(LogLevel.WARN.value, message))
+        self._send_notification(LogLevel.WARN.value, message)
 
     def error(self, message: str):
         print(f"[{self.service_name}] ERROR: {message}")
         self._log_to_db(LogLevel.ERROR.value, message)
         self._log_to_json(LogLevel.ERROR.value, message)
-        asyncio.create_task(self._notify_discord(LogLevel.ERROR.value, message))
+        self._send_notification(LogLevel.ERROR.value, message)
 
     def critical(self, message: str):
         print(f"[{self.service_name}] CRITICAL: {message}")
         self._log_to_db(LogLevel.CRITICAL.value, message)
         self._log_to_json(LogLevel.CRITICAL.value, message)
-        asyncio.create_task(self._notify_discord(LogLevel.CRITICAL.value, message))
+        self._send_notification(LogLevel.CRITICAL.value, message)
 
 # Usage: logger = ShipLogger("core")

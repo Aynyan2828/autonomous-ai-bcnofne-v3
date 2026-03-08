@@ -225,10 +225,15 @@ async def lifespan(app: FastAPI):
     
     thinking_task = asyncio.create_task(proactive_thinking_loop())
     
-    # 2. IP Address Discovery (Migrated from start.sh)
+    # 2. IP Address Discovery (Migrated from start.sh + Fallback)
     db = SessionLocal()
     try:
-        ips = {"HOST_IP": "NOT_FOUND", "TAILSCALE_IP": "NOT_FOUND"}
+        ips = {
+            "HOST_IP": os.getenv("HOST_IP", "NOT_FOUND"),
+            "TAILSCALE_IP": os.getenv("TAILSCALE_IP", "NOT_FOUND")
+        }
+        
+        # psutil で実 IP が見つかれば上書き（ホストネットワーク・モード時など）処操
         for interface, addrs in psutil.net_if_addrs().items():
             for addr in addrs:
                 if addr.family == socket.AF_INET:
