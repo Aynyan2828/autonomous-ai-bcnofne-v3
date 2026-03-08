@@ -8,7 +8,8 @@ from typing import List
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.database import SessionLocal, LongtermSessionLocal, get_db, get_longterm_db
-from shared.models import Memory, init_db # init_db を使って長期DBも初期化する
+from shared import init_db
+from shared.models import Memory
 from shared.logger import ShipLogger
 
 logger = ShipLogger("memory-service")
