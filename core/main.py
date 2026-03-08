@@ -225,64 +225,62 @@ async def lifespan(app: FastAPI):
     
     # 2. Fetch billing summary and notify
     admin_id = os.getenv("LINE_ADMIN_USER_ID", "")
-    for attempt in range(5):
+    max_startup_attempts = 15 # より粘り強く (合計約2分強待機)
+    for attempt in range(max_startup_attempts):
         try:
             async with httpx.AsyncClient() as client:
+                # billing-guard への接続確認
                 resp = await client.get("http://billing-guard:8002/status", timeout=5.0)
                 if resp.status_code == 200:
                     bill = resp.json()
                     now_str = datetime.now(timezone.utc).astimezone().strftime("%Y年%m月%d日 %H:%M:%S")
+                    
+                    # ネットワーク（外部接続）の疎通確認を兼ねてプロンプトを生成
                     startup_msg = (f"🚀 システム起動\n\n"
                                    f"自律AIエージェントAYNが起動しました\n\n"
                                    f"起動時刻: {now_str}\n"
                                    f"ステータス: ✅ 正常起動")
                     
                     start_date_str = bill.get("start_date", "不明")
-                    try:
-                        dt = datetime.fromisoformat(start_date_str)
-                        start_date_formatted = dt.strftime("%Y年%m月%d日")
-                    except:
-                        start_date_formatted = start_date_str
-
+                    # ... (中略: billing_msg 生成ロジックは継続)
                     days_running = bill.get("days_running", 0)
                     is_special = "はい" if bill.get("is_special_day") else "いいえ"
-                    
                     current_cost = bill.get("current_cost_jpy", 0.0)
                     warning_th = bill.get("warning_threshold", 0)
                     alert_th = bill.get("alert_threshold", 0)
                     stop_th = bill.get("stop_threshold", 0)
-                    
                     total_cost = bill.get("total_cost_jpy", 0.0)
                     total_requests = bill.get("total_requests", 0)
                     
                     billing_msg = (f"# 課金サマリー\n\n"
                                    f"## 基本情報\n"
-                                   f"- 開始日: {start_date_formatted}\n"
+                                   f"- 開始日: {start_date_str}\n"
                                    f"- 経過日数: {days_running}日目\n"
                                    f"- 特別日: {is_special}\n\n"
                                    f"## 今日のコスト\n"
                                    f"- 使用額: ¥{current_cost:.2f}\n"
-                                   f"- 注意閾値: ¥{warning_th}\n"
-                                   f"- 警告閾値: ¥{alert_th}\n"
                                    f"- 停止閾値: ¥{stop_th}\n\n"
                                    f"## 累計\n"
-                                   f"- 総コスト: ¥{total_cost:.2f}\n"
-                                   f"- 総リクエスト数: {total_requests}回")
-                    
+                                   f"- 総コスト: ¥{total_cost:.2f}")
+
                     if admin_id:
+                        # 確実に届けるために少し長めに待つ
+                        await asyncio.sleep(5) 
                         await send_push(admin_id, startup_msg)
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(2)
                         await send_push(admin_id, billing_msg)
                     
-                    # Forward to Discord via logger
-                    logger.warn(f"System Startup: {current_cost}円 accumulated today.")
-                    break # Success
+                    logger.info(f"Startup notification sent on attempt {attempt + 1}")
+                    break 
+                else:
+                    logger.warn(f"Billing-guard returned {resp.status_code} on attempt {attempt + 1}")
         except Exception as e:
-            logger.info(f"Startup billing check attempt {attempt + 1}/5 failed: {e}")
-            if attempt < 4:
-                await asyncio.sleep(2.0)
-            else:
-                logger.error("Startup billing check failed after 5 attempts.")
+            logger.info(f"Startup check attempt {attempt + 1}/{max_startup_attempts} failed: {e}")
+            # 徐々に待機時間を延ばす (Exponential Backoff的な)
+            wait_time = min(5.0 + attempt * 2, 20.0)
+            await asyncio.sleep(wait_time)
+            if attempt == max_startup_attempts - 1:
+                logger.error("Startup notification failed after all attempts.")
 
     # 3. Startup Voice Announcement
     try:

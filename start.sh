@@ -44,28 +44,39 @@ docker compose down
 docker compose pull
 docker compose up -d --build
 
-# 3. Ngrok Startup for LINE Webhook
+# 3. Webhook Setup (Ngrok or Tailscale Funnel)
 echo "====================================="
-echo " Starting Ngrok for LINE Webhook...  "
+echo " Setting up External Webhook...      "
 echo "====================================="
+
+# [Option A] Ngrok (Dynamic URL)
 pkill ngrok
 sleep 1
 ngrok http 8001 > /dev/null 2>&1 &
-sleep 5
+sleep 8 # Wait for ngrok
 
-# 4. Display Webhook URL
 WEBHOOK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
 
+# [Option B] Tailscale Funnel (Persistent - RECOMMENDED)
+# If you have Tailscale Funnel enabled, overwrite WEBHOOK_URL here:
+# WEBHOOK_URL="https://${TS_IP}.ts.net" # OR your custom funnel domain
+# echo "USING TAILSCALE FUNNEL: ${WEBHOOK_URL}"
+
+# 4. Save Webhook URL and notify
 if [ -n "$WEBHOOK_URL" ] && [ "$WEBHOOK_URL" != "null" ]; then
+    echo "WEBHOOK_URL=${WEBHOOK_URL}" >> .env
     echo ""
     echo "=========================================================="
-    echo " [SUCCESS] Ngrok Tunnel Established!"
-    echo " Webhook URL for LINE Developers console:"
-    echo " -> ${WEBHOOK_URL}/webhook"
+    echo " [SUCCESS] Webhook URL Established!"
+    echo " Webhook URL: ${WEBHOOK_URL}/webhook"
+    echo " (Saved to .env for services to display on OLED)"
     echo "=========================================================="
+    
+    # Update DB for OLED display (optional helper)
+    docker compose exec -T core python3 -c "import sqlite3; conn=sqlite3.connect('/app/data/shipos.db'); conn.execute(\"INSERT OR REPLACE INTO system_state (key, value) VALUES ('last_webhook_url', '${WEBHOOK_URL}/webhook')\"); conn.commit(); conn.close()" 2>/dev/null
 else
     echo ""
-    echo "[ERROR] Failed to get Ngrok URL."
+    echo "[ERROR] Failed to establish Webhook URL."
 fi
 
 echo ""

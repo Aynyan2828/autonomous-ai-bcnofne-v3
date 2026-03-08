@@ -328,7 +328,11 @@ def update_oled(db: Session):
     ip = os.environ.get("HOST_IP", "??") 
     ts_ip = os.environ.get("TAILSCALE_IP", "??")
     
-    ip_scroll = f"LAN:{ip} TS:{ts_ip}"
+    # Webhook URL from DB (updated by start.sh)
+    webhook_url = get_system_state_val(db, "last_webhook_url", "")
+    webhook_part = f" WEBHOOK:{webhook_url}" if webhook_url else ""
+    
+    ip_scroll = f"LAN:{ip} TS:{ts_ip}{webhook_part}"
     
     # Scroll message setup (Clean ASCII only)
     new_scroll = clean_text(get_system_state_val(db, "oled_scroll_msg", "System Online"))
