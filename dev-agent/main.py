@@ -16,7 +16,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared import init_db
 from shared.logger import ShipLogger
 
-VERSION = "v3.1.2-debug"
+VERSION = "v3.1.3-debug"
+print(f"AYN {VERSION} STARTING... (CWD: {os.getcwd()})")
 
 logger = ShipLogger("dev-agent")
 app = FastAPI(title="shipOS Dev Agent")
@@ -58,15 +59,20 @@ async def execute_apply(proposal_id: str):
         # 2. バックアップ (Git commit)
         try:
             # Dockerコンテナ内での所有権エラーとIdentityエラーの回避
-            subprocess.run(["git", "config", "--global", "--add", "safe.directory", SRC_DIR], check=True)
-            subprocess.run(["git", "config", "--global", "user.email", "ayn@shipos.local"], check=True)
-            subprocess.run(["git", "config", "--global", "user.name", "AYN"], check=True)
+            # --system を使うことで HOME の依存性を減らす
+            subprocess.run(["git", "config", "--system", "--add", "safe.directory", SRC_DIR], check=True)
+            subprocess.run(["git", "config", "--system", "user.email", "ayn@shipos.local"], check=True)
+            subprocess.run(["git", "config", "--system", "user.name", "AYN"], check=True)
             
             subprocess.run(["git", "-C", SRC_DIR, "add", "."], check=True)
-            subprocess.run(["git", "-C", SRC_DIR, "commit", "-m", f"pre-apply backup for {proposal_id}"], check=True)
-            logger.info("Backup commit created successfully.")
+            # 変更がない場合でも exit 0 にするために commit に --allow-empty を付与
+            res = subprocess.run(["git", "-C", SRC_DIR, "commit", "-m", f"pre-apply backup for {proposal_id}", "--allow-empty"], 
+                                 capture_output=True, text=True, check=True)
+            logger.info(f"Backup commit created successfully: {res.stdout.strip()}")
+        except subprocess.CalledProcessError as e:
+            logger.warn(f"Backup commit skipped or failed (Git Error 128?): {e.stderr.strip()}")
         except Exception as e:
-            logger.warn(f"Backup commit skipped or failed: {e}")
+            logger.warn(f"Backup commit fatal error: {repr(e)}")
 
         # 3. 反映実行 (workspace から src へコピー)
         # 固定の workspace 構造を想定

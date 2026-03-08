@@ -128,6 +128,7 @@ def get_longterm_memories(topic: str = None, layer: str = None, limit: int = 20,
 @app.get("/summary")
 def get_memory_summary(db: Session = Depends(get_db)):
     """現在保持している重要な記憶を要約する。MISSION や REFLECTIVE を優先的に含める。"""
+    logger.info("Memory summary requested via /summary")
     # 特定の層を優先して取得
     priority_layers = [MemoryLayer.MISSION.value, MemoryLayer.REFLECTIVE.value, MemoryLayer.SEMANTIC.value]
     memories = db.query(Memory).filter(Memory.layer.in_(priority_layers)).order_by(Memory.importance.desc(), Memory.created_at.desc()).limit(5).all()
