@@ -25,6 +25,12 @@ except Exception as e:
     print(f"[OLED/FAN] Hardware libraries not available. Running in stub mode. ({e})")
     traceback.print_exc()
 
+def clean_text(text: str) -> str:
+    """Strictly keep only ASCII printable characters to prevent OLED corruption."""
+    if not text:
+        return ""
+    return "".join(c for c in text if 32 <= ord(c) <= 126)
+
 app = FastAPI(title="shipOS OLED & Fan Controller")
 
 # Configuration Constants
@@ -34,31 +40,31 @@ FAN_PIN = 14
 TEMP_THRESHOLD_HIGH = 60.0 # Fan ON
 TEMP_THRESHOLD_LOW = 45.0  # Fan OFF
 
-# shipOS モード表示マッピング（航海用語）
+# shipOS Mode Mapping (Naval Terms)
 SHIP_MODE_DISPLAY = {
-    "autonomous":  "SAIL",    # 自律航海
-    "user_first":  "PORT",    # 入港待機
-    "maintenance": "DOCK",    # ドック入り
-    "power_save":  "ANCHOR",  # 停泊
-    "safe":        "SOS",     # 救難信号
+    "autonomous":  "SAIL",
+    "user_first":  "PORT",
+    "maintenance": "DOCK",
+    "power_save":  "ANCHOR",
+    "safe":        "SOS",
 }
 
 SHIP_MODE_EMOJI = {
-    "autonomous":  "⛵",
-    "user_first":  "🏠",
-    "maintenance": "🔧",
-    "power_save":  "🌙",
-    "safe":        "🆘",
+    "autonomous":  "[~]",
+    "user_first":  "[P]",
+    "maintenance": "[M]",
+    "power_save":  "[z]",
+    "safe":        "[!]",
 }
 
-# AI状態 → 航海用語
+# AI State -> Naval Terms
 AI_STATE_DISPLAY = {
-    "Idle":          "WATCH",    # 見張り
-    "Planning":      "HELM",     # 操舵中
-    "Acting":        "ENGINE",   # 機関稼働
-    "Moving Files":  "CARGO",    # 積荷移動
-    "Error":         "ALARM",    # 警報
-    "Wait":          "SIGNAL",   # 信号待ち
+    "Idle":          "WATCH",
+    "Planning":      "HELM",
+    "Acting":        "ENGINE",
+    "Moving Files":  "CARGO",
+    "Error":         "ALARM",
+    "Wait":          "SIGNAL",
     "RUNNING":       "HELM",
     "STOPPED":       "ALARM",
 }
@@ -123,10 +129,9 @@ def get_system_state_val(db: Session, key: str, default: str) -> str:
     return state.value if state else default
 
 def compute_mood(temp: float, ai_status: str, ship_mode: str) -> tuple[int, str]:
-    """旧バージョンの簡易版Mood算出 (OLED表示用)"""
+    """Simplified Mood calculation for OLED display (ASCII only)."""
     score = 80
     
-    # 温度による減点
     if temp >= 75:
         score -= 35
     elif temp >= 65:
@@ -134,7 +139,6 @@ def compute_mood(temp: float, ai_status: str, ship_mode: str) -> tuple[int, str]
     elif 0 < temp <= 45:
         score += 5
         
-    # AI状態補正
     st = (ai_status or "").lower()
     if "error" in st or "stop" in st or ship_mode == "safe":
         score -= 25
@@ -145,13 +149,13 @@ def compute_mood(temp: float, ai_status: str, ship_mode: str) -> tuple[int, str]
 
     score = max(0, min(100, int(round(score))))
     
-    if score >= 85: emoji = "😎"
-    elif score >= 70: emoji = "😊"
-    elif score >= 55: emoji = "😗"
-    elif score >= 35: emoji = "😨"
-    else: emoji = "🥵" if temp >= 70 else "😤"
+    if score >= 85: face = "(^o^)"
+    elif score >= 70: face = "(^_^)"
+    elif score >= 55: face = "(o_o)"
+    elif score >= 35: face = "(._.)"
+    else: face = "(x_x)" if temp >= 70 else "(>_<)"
         
-    return score, emoji
+    return score, face
 
 def update_oled(db: Session):
     global scroll_pos, scroll_message
@@ -163,21 +167,28 @@ def update_oled(db: Session):
     ship_mode = get_system_state_val(db, "ship_mode", "autonomous") # 内部名は小文字のautonomous等になった
     temp = get_cpu_temp()
     
-    # Mood算出
-    score, mood_emoji = compute_mood(temp, ai_status, ship_mode)
+    # Mood calculation
+    score, mood_face = compute_mood(temp, ai_status, ship_mode)
     
-    # 表示マッピング
+    # Mapping
     mode_disp = SHIP_MODE_DISPLAY.get(ship_mode, "SAIL")
-    mode_emoji = SHIP_MODE_EMOJI.get(ship_mode, "⛵")
+    mode_emoji = SHIP_MODE_EMOJI.get(ship_mode, "[~]")
     ai_disp = AI_STATE_DISPLAY.get(ai_status, ai_status[:6])
     
-    # ネットワーク情報はMVPでは環境変数やダミーでしのぐ
-    ip = os.environ.get("HOST_IP", "192.168.x.x") 
+    # Network info from environment
+    ip = os.environ.get("HOST_IP", "??") 
+    ts_ip = os.environ.get("TAILSCALE_IP", "??")
     
-    # スクロールメッセージ設定
-    new_scroll = get_system_state_val(db, "oled_scroll_msg", "System Online")
-    if new_scroll != scroll_message:
-        scroll_message = new_scroll
+    ip_text = f"IP:{ip}" if ip != "??" else ""
+    if ts_ip != "??":
+        ip_text += f" TS:{ts_ip}"
+    
+    # Scroll message setup (Clean ASCII only)
+    new_scroll = clean_text(get_system_state_val(db, "oled_scroll_msg", "System Online"))
+    total_scroll = f"{new_scroll} | {ip_text}" if ip_text else new_scroll
+    
+    if total_scroll != scroll_message:
+        scroll_message = total_scroll
         scroll_pos = OLED_WIDTH
 
     image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
@@ -191,22 +202,22 @@ def update_oled(db: Session):
         font = None # Use basic text
         
     # ====== DRAWING ======
-    # 行1: タイトルと船・モード (shipOS: SAIL ⛵)
-    draw.text((0, 0), f"shipOS:{mode_disp} {mode_emoji}", font=font, fill=255)
+    # Line 1: Title and Mode
+    draw.text((0, 0), clean_text(f"shipOS:{mode_disp} {mode_emoji}"), font=font, fill=255)
     
-    # 行2: DEST (V3ではとりあえず固定かSystemStateから取得)
-    goal = get_system_state_val(db, "ai_target_goal", "---")[:13]
+    # Line 2: DEST
+    goal = clean_text(get_system_state_val(db, "ai_target_goal", "---"))[:13]
     draw.text((0, 12), f"DEST:{goal}", font=font, fill=255)
     
-    # 行3: HELM (HELM:WATCH 😊85)
-    draw.text((0, 24), f"HELM:{ai_disp} {mood_emoji}{score:02d}", font=font, fill=255)
+    # Line 3: HELM
+    draw.text((0, 24), clean_text(f"HELM:{ai_disp} {mood_face}{score:02d}"), font=font, fill=255)
     
-    # 行4: 温度等ハードウェア (TEMP:45.0C DISK:...)
+    # Line 4: Hardwares
     fan_mark = "*" if fan_is_on else " "
     draw.text((0, 36), f"T:{temp:.1f}C FAN[{fan_mark}]", font=font, fill=255)
     
-    # 行5: IP (IP:192.168.x.x)
-    draw.text((0, 48), f"IP:{ip}", font=font, fill=255)
+    # Line 5: Scrolling message
+    draw.text((scroll_pos, 48), scroll_message, font=font, fill=255)
     
     # スクロール位置更新
     scroll_pos -= 2

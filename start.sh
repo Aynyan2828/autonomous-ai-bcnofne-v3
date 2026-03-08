@@ -1,45 +1,74 @@
 #!/bin/bash
-# autonomous AI BCNOFNe system v3 (shipOS) - 起動＆Webhook連携スクリプト
+# shipOS v3 (autonomous AI BCNOFNe system) - Startup Script
 #
-# 前提: ngrok がインストールされ、認証トークンが設定されていること
-#      sudo apt install jq (JSON解析用) がインストールされていること
+# Requirements:
+# - ngrok installed and authtoken configured
+# - jq installed (sudo apt install jq)
+# - tailscale installed (optional)
 
-# 1. shipOS コンテナの起動
+# 1. IP Address Discovery
+echo "====================================="
+echo " Exploring Network for IPs...        "
+echo "====================================="
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+echo "FOUND LOCAL IP: ${LOCAL_IP}"
+
+TS_IP=""
+if command -v tailscale &> /dev/null; then
+    TS_IP=$(tailscale ip -4 2>/dev/null | head -n 1)
+    if [ -n "$TS_IP" ]; then
+        echo "FOUND TAILSCALE IP: ${TS_IP}"
+    else
+        echo "TAILSCALE IP NOT FOUND"
+    fi
+else
+    echo "TAILSCALE NOT INSTALLED"
+fi
+
+# Update .env file with current IPs
+# This ensures docker-compose can pass them to containers
+if [ -f .env ]; then
+    sed -i '/^HOST_IP=/d' .env
+    sed -i '/^TAILSCALE_IP=/d' .env
+    echo "HOST_IP=${LOCAL_IP}" >> .env
+    echo "TAILSCALE_IP=${TS_IP}" >> .env
+else
+    echo "HOST_IP=${LOCAL_IP}" > .env
+    echo "TAILSCALE_IP=${TS_IP}" >> .env
+fi
+
+# 2. Restart Containers
 echo "====================================="
 echo " Starting shipOS Docker containers... "
 echo "====================================="
+docker compose down
 docker compose pull
 docker compose up -d --build
 
-# 2. Ngrok の起動 (バックグラウンドでポート8001: line-gateway を公開)
+# 3. Ngrok Startup for LINE Webhook
 echo "====================================="
 echo " Starting Ngrok for LINE Webhook...  "
 echo "====================================="
-# 古いngrokプロセスをキル
 pkill ngrok
-
-# line-gateway (8001番ポート) を公開。ログは一時ファイルに捨てる
+sleep 1
 ngrok http 8001 > /dev/null 2>&1 &
+sleep 5
 
-# Ngrokがトンネルを確立するまで数秒待機
-sleep 4
-
-# 3. Webhook URLの取得と表示
+# 4. Display Webhook URL
 WEBHOOK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
 
 if [ -n "$WEBHOOK_URL" ] && [ "$WEBHOOK_URL" != "null" ]; then
     echo ""
     echo "=========================================================="
     echo " [SUCCESS] Ngrok Tunnel Established!"
-    echo " 以下のURLをLINE DevelopersのWebhook URLに設定してください："
+    echo " Webhook URL for LINE Developers console:"
     echo " -> ${WEBHOOK_URL}/webhook"
     echo "=========================================================="
 else
-    echo " "
-    echo "[ERROR] NgrokのURL取得に失敗しました。"
-    echo "ngrok が正しくインストール・設定されているか確認してください。"
+    echo ""
+    echo "[ERROR] Failed to get Ngrok URL."
 fi
 
 echo ""
-echo "ログを確認するには: docker compose logs -f"
-echo "終了するには: docker compose down && pkill ngrok"
+echo "To view logs: docker compose logs -f"
+echo "To shutdown: docker compose down && pkill ngrok"
