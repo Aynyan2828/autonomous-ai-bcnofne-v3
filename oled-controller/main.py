@@ -29,10 +29,11 @@ except Exception as e:
     traceback.print_exc()
 
 def clean_text(text: str) -> str:
-    """Strictly keep only ASCII printable characters to prevent OLED corruption."""
+    """Keep printable characters including Japanese (UTF-8)."""
     if not text:
         return ""
-    return "".join(c for c in text if 32 <= ord(c) <= 126)
+    # ASCII 制御文字以外は大体許可する
+    return "".join(c for c in text if ord(c) >= 32 or c == '\n')
 
 app = FastAPI(title="shipOS OLED & Fan Controller")
 
@@ -353,19 +354,33 @@ def update_oled(db: Session):
     draw = ImageDraw.Draw(image)
     
     try:
-        # 日本語や絵文字も表示できるフォントが必要だが、コンテナ内にはデフォしかない可能性が高い。
-        # ひとまずデフォルトで表示を試みるが、絵文字は文字化けする可能性があるため、フォールバックも考慮。
+        # 日本語表示用のフォントをロード
+        jp_font_paths = [
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"
+        ]
+        font = None
+        for p in jp_font_paths:
+            if os.path.exists(p):
+                font = ImageFont.truetype(p, 10)
+                break
+        if not font:
+            font = ImageFont.load_default()
+    except Exception as e:
+        logger.error(f"Failed to load font: {e}")
         font = ImageFont.load_default()
-    except:
-        font = None # Use basic text
         
     # ====== DRAWING ======
     # Line 1: shipOS: SAIL >===> [~]
     draw.text((0, 0), clean_text(f"shipOS:{mode_disp} {mode_emoji}"), font=font, fill=255)
     
     # Line 2: DEST: [Goal]
-    goal = clean_text(get_system_state_val(db, "ai_target_goal", "---"))[:13]
-    draw.text((0, 11), f"DEST:{goal}", font=font, fill=255)
+    # AI の最新の思考・活動ログを日本語で取得
+    goal = get_system_state_val(db, "ai_target_goal", "---")
+    # 日本語込みで13文字程度に制限（表示幅に合わせて調整が必要かもしれないが、まずはシンプルに）
+    # スクロールさせることも検討できるが、一旦切り詰め
+    goal_disp = clean_text(goal)[:20]
+    draw.text((0, 11), f"DEST:{goal_disp}", font=font, fill=255)
     
     # Line 3: AI: (face)
     draw.text((0, 22), f"AI: {ai_face}", font=font, fill=255)

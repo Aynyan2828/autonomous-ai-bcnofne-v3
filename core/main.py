@@ -163,7 +163,8 @@ async def proactive_thinking_loop():
                     )
                     thought = response.choices[0].message.content.strip()
 
-                    # 3. 必要なら LINE 送信
+                    # 3. 必要なら LINE 送信 & 目標状態を更新
+                    set_system_state(db, "ai_target_goal", thought[:50]) # OLED用に少し短くして保存
                     if thought != "(NONE)" and admin_id:
                         await send_push(admin_id, thought)
                         logger.info(f"Proactive thought sent: {thought[:30]}...")
