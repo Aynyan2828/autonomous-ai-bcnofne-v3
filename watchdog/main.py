@@ -22,6 +22,7 @@ SERVICES_TO_MONITOR = [
     {"name": "billing-guard", "url": "http://billing-guard:8002/health"},
     {"name": "memory-service", "url": "http://memory-service:8003/health"},
     {"name": "diary-service", "url": "http://diary-service:8004/health"},
+    {"name": "dev-agent", "url": "http://dev-agent:8013/health"},
 ]
 
 def log_event(level: str, message: str):
