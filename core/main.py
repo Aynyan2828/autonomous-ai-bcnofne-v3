@@ -479,9 +479,10 @@ async def handle_proposal_approve(reply_token: str, prop_id: str):
                 # dev-agent に伝達
                 try:
                     await client.post(f"http://dev-agent:8013/apply/{prop_id}", timeout=5.0)
+                    await send_reply(reply_token, f"了解！改修案 {prop_id} の出航（適用）を許可したばい。整備を開始するけん、ちょっと待っとってね！")
                 except Exception as e:
                     logger.error(f"Failed to notify dev-agent: {e}")
-                await send_reply(reply_token, f"了解！改修案 {prop_id} の出航（適用）を許可したばい。整備を開始するけん、ちょっと待っとってね！")
+                    await send_reply(reply_token, f"承認は記録したばってん、整備士（dev-agent）に連絡がつかなかったばい。後でもう一度「承認 {prop_id}」って送ってみて！")
             else:
                 await send_reply(reply_token, "承認処理に失敗したばい。")
         except Exception as e:

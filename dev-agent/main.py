@@ -122,7 +122,7 @@ async def development_loop():
 
 async def safe_get_memory_summary(client):
     """memory-service からの要約取得をリトライ付きで実行"""
-    for i in range(3):
+    for i in range(10):  # 起動待ちを考慮して回数を増やす
         try:
             r = await client.get(f"{MEMORY_SERVICE_URL}/summary", timeout=10.0)
             if r.status_code == 200:
