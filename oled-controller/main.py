@@ -105,13 +105,21 @@ def show_boot_animation():
     
     # Load Logo
     logo = None
-    if os.path.exists(LOGO_PATH):
-        try:
-            logo = Image.open(LOGO_PATH).convert("1")
-        except Exception as e:
-            logger.error(f"Failed to load logo: {e}")
+    paths_to_try = [LOGO_PATH, "oled_128x64_resize_dither.png", "./oled-controller/oled_128x64_resize_dither.png"]
+    
+    logger.info(f"OLED: Starting boot animation. Current DIR: {os.getcwd()}")
+    logger.info(f"OLED: Files in /app: {os.listdir('/app') if os.path.exists('/app') else 'N/A'}")
 
-    checks = [
+    for p in paths_to_try:
+        if os.path.exists(p):
+            try:
+                logo = Image.open(p).convert("1")
+                logger.info(f"OLED: Successfully loaded logo from {p}")
+                break
+            except Exception as e:
+                logger.error(f"OLED: Failed to open logo at {p}: {e}")
+        else:
+            logger.info(f"OLED: Logo not found at {p}")
         "CPU TEMPERATURE",
         "I2C BUS STATUS",
         "FAN CONTROLLER",
