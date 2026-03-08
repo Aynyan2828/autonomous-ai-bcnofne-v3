@@ -230,7 +230,7 @@ async def run_autonomous_observation():
         logger.error(f"Observation / Suggestion error: {e}\n{error_trace}")
 
 async def process_suggestion(suggestion):
-    """提案された内容を実際に workspace で実装・テストする"""
+    """提案された内容を実際に workspace で実装・テストする (リトライ機能付き)"""
     prop_id = suggestion["id"]
     logger.info(f"Processing suggestion: {prop_id} - {suggestion['title']}")
     set_system_state_helper("ai_target_goal", f"改修案を作成中ばい: {suggestion['title'][:10]}...")
@@ -239,7 +239,7 @@ async def process_suggestion(suggestion):
     if not files:
         return
 
-    # 1. Workspace の準備 (既存ファイルがあれば src からコピー、なければ新規作成の準備)
+    # 1. Workspace の準備
     for f in files:
         src_path = os.path.join(SRC_DIR, f)
         dest_path = os.path.join(WORKSPACE_DIR, f)
@@ -247,68 +247,90 @@ async def process_suggestion(suggestion):
         if os.path.exists(src_path):
             shutil.copy2(src_path, dest_path)
         else:
-            # 新規ファイルの場合は空ファイルを作成しておく
             with open(dest_path, "w") as empty_f:
                 empty_f.write("")
             logger.info(f"Prepared new file in workspace: {f}")
 
-    # 2. 差分生成 (OpenAI にコード修正を依頼)
+    # 2. & 3. 差分生成とテストのリトライループ (最大3回)
+    max_attempts = 3
+    success = False
+    test_report = ""
     full_diff = ""
-    for f in files:
-        work_path = os.path.join(WORKSPACE_DIR, f)
+    errors_feedback = "" # AIへのフィードバック用
+
+    for attempt in range(1, max_attempts + 1):
+        logger.info(f"Development attempt {attempt}/{max_attempts} for {prop_id}")
+        if attempt > 1:
+            set_system_state_helper("ai_target_goal", f"デバッグ中ばい({attempt}回目): {prop_id}")
+
+        current_attempt_success = True
+        current_attempt_report = f"--- Attempt {attempt} ---\n"
         
-        original_code = ""
-        if os.path.exists(work_path):
-            with open(work_path, "r") as f_in:
-                original_code = f_in.read()
-            
-        edit_prompt = f"""
+        # 各ファイルの生成
+        for f in files:
+            work_path = os.path.join(WORKSPACE_DIR, f)
+            original_code = ""
+            if os.path.exists(work_path) and attempt == 1:
+                # 初回のみ現在のファイルを読み取る（2回目以降は前回生成したファイルが work_path にある）
+                with open(work_path, "r") as f_in:
+                    original_code = f_in.read()
+            elif attempt > 1:
+                # リトライ時は「直前の失敗コード」を元に修正させるため、再度読み込む
+                with open(work_path, "r") as f_in:
+                    original_code = f_in.read()
+
+            edit_prompt = f"""
 ファイル: {f}
 修正計画: {suggestion['plan']}
+現在の試行回数: {attempt}/{max_attempts}
 
+【指示】
 現在のコードを読み、計画に沿って修正した「完全な新しいコード」を出力してください。
-ファイルが新規作成の場合は、適切な内容を作成してください。
-余計な解説は不要です。コードのみ出力してください。
-
-【元のコード (空の場合は新規作成)】
-{original_code}
 """
-        res = await openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": edit_prompt}]
-        )
-        new_code = res.choices[0].message.content.strip()
-        # Markdownのデコレーションを剥ぎ取る
-        if new_code.startswith("```"):
-            new_code = "\n".join(new_code.split("\n")[1:-1])
-            
-        with open(work_path, "w") as f_out:
-            f_out.write(new_code)
-        
-        # 簡易的なdiff記録
-        full_diff += f"--- {f} (original)\n+++ {f} (updated)\n"
-        full_diff += f"@@ -1,{len(original_code.splitlines())} +1,{len(new_code.splitlines())} @@\n"
-        full_diff += "(Code updated/created)\n\n"
+            if errors_feedback:
+                edit_prompt += f"\n【前回の失敗原因 (Syntax Error)】\n{errors_feedback}\nこのエラーを解消するように修正してください。"
 
-    # 3. テスト (Syntax Check)
-    test_report = ""
-    success = True
-    for f in files:
-        work_path = os.path.join(WORKSPACE_DIR, f)
-        if f.endswith(".py"):
-            res = subprocess.run(["python3", "-m", "py_compile", work_path], capture_output=True, text=True)
-            if res.returncode != 0:
-                success = False
-                test_report += f"❌ Syntax check failed: {f}\n{res.stderr}\n"
-            else:
-                test_report += f"✅ Syntax check passed: {f}\n"
+            edit_prompt += f"\n\n【現在のコード】\n{original_code}\n\n余計な解説は不要です。コードのみ出力してください。"
+
+            res = await openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": edit_prompt}]
+            )
+            new_code = res.choices[0].message.content.strip()
+            if new_code.startswith("```"):
+                new_code = "\n".join(new_code.split("\n")[1:-1])
+            
+            with open(work_path, "w") as f_out:
+                f_out.write(new_code)
+            
+            # テスト (Syntax Check)
+            if f.endswith(".py"):
+                res_test = subprocess.run(["python3", "-m", "py_compile", work_path], capture_output=True, text=True)
+                if res_test.returncode != 0:
+                    current_attempt_success = False
+                    current_attempt_report += f"❌ Syntax check failed: {f}\n{res_test.stderr}\n"
+                    errors_feedback = res_test.stderr # 次のリトライ用のフィードバック
+                else:
+                    current_attempt_report += f"✅ Syntax check passed: {f}\n"
+
+        if current_attempt_success:
+            success = True
+            test_report = current_attempt_report
+            # Diffの簡易生成（全ファイル分）
+            for f in files:
+                full_diff += f"--- {f} (updated)\n(Code generated/fixed in attempt {attempt})\n\n"
+            break
+        else:
+            test_report = current_attempt_report # 最終的なレポート用に保存
 
     # 4. 提案の保存
     async with httpx.AsyncClient() as client:
         status = "PENDING" if success else "FAILED"
-        if not success:
-            logger.warn(f"Auto-discarding proposal {prop_id} due to syntax errors.")
-            set_system_state_helper("ai_target_goal", f"改修案 {prop_id} はエラーで廃案になったばい")
+        if success:
+            logger.info(f"Proposal {prop_id} ready after {attempt} attempts.")
+        else:
+            logger.warn(f"Auto-discarding proposal {prop_id} after {max_attempts} failed attempts.")
+            set_system_state_helper("ai_target_goal", f"改修案 {prop_id} は3回直そうとしたばってん、ダメやった...")
 
         await client.post(f"{MEMORY_SERVICE_URL}/proposals/", json={
             "id": prop_id,
@@ -321,16 +343,13 @@ async def process_suggestion(suggestion):
             "status": status
         })
 
-    # 5. LINE 通知を core に依頼
+    # 5. LINE 通知を core に依頼 (成功時のみ)
     if success:
-        # core サービスに通知（本来は LINE gateway 直でも良いが、core が人格を担当）
         async with httpx.AsyncClient() as client:
-            # 内部的な通知システム（仮）
-            report_msg = f"【整備報告】\n{suggestion['title']}の改修案がまとまったばい！\nテストもパスしたけん、確認して出航（承認）ばお願い！\n\nID: {prop_id}\n\n「詳細 {prop_id}」で中身ば見れるよ。"
-            # 管理者にプッシュ送信
+            attempts_msg = f"（{attempt}回目の修正で成功したばい！）" if attempt > 1 else ""
+            report_msg = f"【整備報告】\n{suggestion['title']}の改修案がまとまったばい！{attempts_msg}\n確認して出航（承認）ばお願い！\n\nID: {prop_id}"
             admin_id = os.getenv("LINE_ADMIN_USER_ID", "")
             if admin_id:
-                # core の push エンドポイントまたは直接 line-gateway
                 await client.post("http://line-gateway:8001/api/v1/push", json={"user_id": admin_id, "text": report_msg})
 
 @app.on_event("startup")
