@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import json
 import uuid
+import traceback
 from datetime import datetime, timezone
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel
@@ -105,9 +106,23 @@ async def development_loop():
             await run_autonomous_observation()
             
         except Exception as e:
-            logger.error(f"Development loop error: {e}")
+            error_trace = traceback.format_exc()
+            logger.error(f"Development loop error: {e}\n{error_trace}")
             
-        await asyncio.sleep(3600) # 1時間おき
+        # 1時間おきに繰り返すが、エラー時は少し早めにリトライを試みる
+        await asyncio.sleep(3600)
+
+async def safe_get_memory_summary(client):
+    """memory-service からの要約取得をリトライ付きで実行"""
+    for i in range(3):
+        try:
+            r = await client.get(f"{MEMORY_SERVICE_URL}/summary", timeout=10.0)
+            if r.status_code == 200:
+                return r.json().get("summary", "")
+        except Exception as e:
+            logger.warn(f"Failed to fetch memory summary (attempt {i+1}): {e}")
+            await asyncio.sleep(5)
+    return "N/A"
 
 async def run_autonomous_observation():
     """観測と改善案の生成"""
@@ -115,13 +130,15 @@ async def run_autonomous_observation():
     
     # 1. データの収集
     async with httpx.AsyncClient() as client:
-        # 直近ログ
-        mem_resp = await client.get(f"{MEMORY_SERVICE_URL}/summary")
-        brain_context = mem_resp.json().get("summary", "") if mem_resp.status_code == 200 else "N/A"
+        # 直近ログ (リトライ付き)
+        brain_context = await safe_get_memory_summary(client)
         
         # 現在の提案（PENDING が多すぎればスキップ）
-        prop_resp = await client.get(f"{MEMORY_SERVICE_URL}/proposals/", params={"status": "PENDING"})
-        pending_count = len(prop_resp.json()) if prop_resp.status_code == 200 else 0
+        try:
+            prop_resp = await client.get(f"{MEMORY_SERVICE_URL}/proposals/", params={"status": "PENDING"}, timeout=5.0)
+            pending_count = len(prop_resp.json()) if prop_resp.status_code == 200 else 0
+        except:
+            pending_count = 0
         
     if pending_count >= 3:
         logger.info("Too many pending proposals. Skipping observation.")
@@ -165,7 +182,8 @@ async def run_autonomous_observation():
         await process_suggestion(suggestion)
 
     except Exception as e:
-        logger.error(f"Observation / Suggestion error: {e}")
+        error_trace = traceback.format_exc()
+        logger.error(f"Observation / Suggestion error: {e}\n{error_trace}")
 
 async def process_suggestion(suggestion):
     """提案された内容を実際に workspace で実装・テストする"""
