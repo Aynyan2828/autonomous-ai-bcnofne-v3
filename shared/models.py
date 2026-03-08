@@ -1,7 +1,10 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, Enum
 from datetime import datetime, timezone
 import enum
-from .database import Base
+from sqlalchemy.orm import declarative_base
+
+# Baseはモデル定義側で一元管理する
+Base = declarative_base()
 
 class ShipMode(str, enum.Enum):
     SAIL = "SAIL"       # autonomous

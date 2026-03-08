@@ -35,8 +35,6 @@ longterm_engine = create_engine(
 )
 LongtermSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=longterm_engine)
 
-Base = declarative_base()
-
 def get_db():
     db = SessionLocal()
     try:

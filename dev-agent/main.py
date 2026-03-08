@@ -13,7 +13,10 @@ from pydantic import BaseModel
 from openai import AsyncOpenAI
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from shared import init_db
 from shared.logger import ShipLogger
+
+VERSION = "v3.1.2-debug"
 
 logger = ShipLogger("dev-agent")
 app = FastAPI(title="shipOS Dev Agent")
@@ -96,8 +99,8 @@ async def development_loop():
     """
     1時間に1回、システムの状態を観測して改善案を練る自律ループ
     """
-    await asyncio.sleep(30) # 起動直後は少し待つ
-    logger.info("Autonomous Development Loop started.")
+    logger.info(f"Autonomous Development Loop started (version: {VERSION})")
+    await asyncio.sleep(30) # 他のサービスの起動を待つ
     
     while True:
         try:
@@ -271,4 +274,11 @@ async def process_suggestion(suggestion):
 
 @app.on_event("startup")
 async def startup_event():
+    # 起動時にDBテーブルを確実に作成する
+    try:
+        init_db()
+        logger.info("Database initialized in dev-agent")
+    except Exception as e:
+        print(f"Critical DB init fail: {e}")
+    
     asyncio.create_task(development_loop())
