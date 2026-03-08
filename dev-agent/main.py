@@ -57,8 +57,10 @@ async def execute_apply(proposal_id: str):
 
         # 2. バックアップ (Git commit)
         try:
-            # Dockerコンテナ内での所有権エラー回避
+            # Dockerコンテナ内での所有権エラーとIdentityエラーの回避
             subprocess.run(["git", "config", "--global", "--add", "safe.directory", SRC_DIR], check=True)
+            subprocess.run(["git", "config", "--global", "user.email", "ayn@shipos.local"], check=True)
+            subprocess.run(["git", "config", "--global", "user.name", "AYN"], check=True)
             
             subprocess.run(["git", "-C", SRC_DIR, "add", "."], check=True)
             subprocess.run(["git", "-C", SRC_DIR, "commit", "-m", f"pre-apply backup for {proposal_id}"], check=True)
@@ -130,9 +132,15 @@ async def safe_get_memory_summary(client):
             if r.status_code == 200:
                 return r.json().get("summary", "")
             else:
-                logger.warn(f"Failed to fetch memory summary (attempt {i+1}): HTTP {r.status_code}")
+                logger.warn(f"Failed to fetch memory summary (attempt {i+1}) from {url}: HTTP {r.status_code}")
         except Exception as e:
-            logger.warn(f"Failed to fetch memory summary (attempt {i+1}): {repr(e)}")
+            import socket
+            hostname = url.split("//")[-1].split(":")[0]
+            try:
+                ip = socket.gethostbyname(hostname)
+            except:
+                ip = "Unknown"
+            logger.warn(f"Failed to fetch memory summary (attempt {i+1}) from {url} ({ip}): {type(e).__name__} - {str(e)}")
             await asyncio.sleep(5)
     return "N/A"
 
