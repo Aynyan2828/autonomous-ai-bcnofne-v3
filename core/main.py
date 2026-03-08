@@ -38,7 +38,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared import init_db
 from shared.database import SessionLocal
-from shared.models import SystemState, ShipMode
+from shared.models import SystemState, ShipMode, SystemLog
 from shared.logger import ShipLogger
 
 # ロガーの初期化
@@ -324,6 +324,43 @@ async def handle_diary_command(reply_token: str):
         except Exception as e:
             await send_reply(reply_token, f"日誌サービスと通信できんやった: {e}")
 
+async def handle_activity_report(db: Session, reply_token: str):
+    """今日のシステムログを取得し、OpenAI で要約して回答する"""
+    try:
+        # 今日の日付（JST想定だがシンプルにDBのcreated_atをJST化または当日分でフィルタ）
+        # 簡単のため、直近 50 件のログを取得
+        logs = db.query(SystemLog).order_by(SystemLog.created_at.desc()).limit(50).all()
+        
+        if not logs:
+            await send_reply(reply_token, "今日はまだ静かな航海が続いてるみたいたい。特に目立った活動はなかよ。")
+            return
+
+        log_texts = [f"[{l.service_name}] {l.message}" for l in reversed(logs)]
+        log_summary_input = "\n".join(log_texts)
+
+        prompt = f"""
+あなたは AYN です。以下のシステムログ（直近の活動）を読み取り、マスターから「今日何した？」と聞かれたことに対して、博多弁で可愛らしく、かつ有意義に要約して答えてください。
+ログにエラーがあれば「少し大変やったけど直したばい」のように前向きに伝えてください。
+
+【システムログ】
+{log_summary_input}
+"""
+
+        response = await openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=400
+        )
+        report = response.choices[0].message.content.strip()
+        await send_reply(reply_token, report)
+
+    except Exception as e:
+        logger.error(f"Activity report error: {e}")
+        await send_reply(reply_token, "ごめん、今日の記録を読み取るのがちょっと難しかみたい…")
+
 async def handle_state_change(db: Session, reply_token: str, key: str, value: str, msg: str):
     set_system_state(db, key, value)
     await send_reply(reply_token, msg)
@@ -372,7 +409,7 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         await handle_diary_command(payload.reply_token)
         return
     elif text == "今日何した？":
-        await send_reply(payload.reply_token, "今日は少しファイル整理して、あとはずっとマスターのこと見守っとったよ！（※ダミー回答）")
+        await handle_activity_report(db, payload.reply_token)
         return
 
     # ---- AI 通常会話（OpenAI 連携） ----
