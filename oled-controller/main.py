@@ -211,6 +211,15 @@ def show_shutdown_animation():
             oled_display.show()
             time.sleep(0.05)
 
+    # 3. 最終メッセージ
+    image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+    draw = ImageDraw.Draw(image)
+    draw.text((10, 20), "safe shutdown .", font=ImageFont.load_default(), fill=255)
+    draw.text((10, 35), "see you master", font=ImageFont.load_default(), fill=255)
+    oled_display.image(image)
+    oled_display.show()
+    time.sleep(2)
+
     oled_display.fill(0)
     oled_display.show()
 
