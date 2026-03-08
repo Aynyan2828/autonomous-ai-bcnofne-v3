@@ -408,7 +408,7 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
     elif text == "航海日誌":
         await handle_diary_command(payload.reply_token)
         return
-    elif text == "今日何した？":
+    elif "今日何した" in text:
         await handle_activity_report(db, payload.reply_token)
         return
 
