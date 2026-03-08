@@ -46,30 +46,32 @@ def log_event(db: Session, level: str, message: str):
     elif level == "CRITICAL" or level == "ERROR":
         logger.critical(message)
 
-def calculate_days_from_start(db: Session) -> int:
-    """システムのインストール日からの日数を計算"""
+def get_install_date(db: Session) -> str:
     install_date_state = db.query(SystemState).filter_by(key="install_date").first()
     now_date = datetime.now(timezone.utc).date()
     
     if not install_date_state or not install_date_state.value:
-        # 初回起動時: 今日の日付を保存
         new_state = SystemState(key="install_date", value=now_date.isoformat())
         db.add(new_state)
         db.commit()
-        return 0 # 0日目
-    else:
-        try:
-            install_date = datetime.fromisoformat(install_date_state.value).date()
-            return (now_date - install_date).days
-        except ValueError:
-            return 0
+        return now_date.isoformat()
+    return install_date_state.value
+
+def calculate_days_from_start(install_date_str: str) -> int:
+    """システムのインストール日からの日数を計算"""
+    try:
+        install_date = datetime.fromisoformat(install_date_str).date()
+        now_date = datetime.now(timezone.utc).date()
+        return (now_date - install_date).days
+    except ValueError:
+        return 0
 
 def is_special_day(days: int) -> bool:
     """0, 6, 12, 18, 24, 30... の特別日判定"""
     return days % 6 == 0
 
-def enforce_limits(db: Session):
-    days_running = calculate_days_from_start(db)
+    install_date_str = get_install_date(db)
+    days_running = calculate_days_from_start(install_date_str)
     special_day = is_special_day(days_running)
     current_cost_jpy = usage_adapter.get_todays_cost_jpy()
 
@@ -162,25 +164,40 @@ def health_check():
 
 @app.get("/status")
 def get_billing_status(db: Session = Depends(get_db)):
-    days_running = calculate_days_from_start(db)
+    install_date_str = get_install_date(db)
+    days_running = calculate_days_from_start(install_date_str)
     special_day = is_special_day(days_running)
     current_cost_jpy = usage_adapter.get_todays_cost_jpy()
     
+    if special_day:
+        warning_threshold, alert_threshold, stop_threshold = 500, 900, 1000
+    else:
+        warning_threshold, alert_threshold, stop_threshold = 200, 200, 300
+    
     alert_state = db.query(SystemState).filter_by(key="billing_alert_level").first()
     alert_level = alert_state.value if alert_state else "NORMAL"
+    
+    total_cost_jpy = current_cost_jpy # MVP: 今回は今日の分だけとする
+    total_requests = 0 # MVP: まだカウントしていない
     
     return {
         "status": "ok",
         "current_cost_jpy": current_cost_jpy,
         "days_running": days_running,
+        "start_date": install_date_str,
         "is_special_day": special_day,
-        "alert_level": alert_level
+        "alert_level": alert_level,
+        "warning_threshold": warning_threshold,
+        "alert_threshold": alert_threshold,
+        "stop_threshold": stop_threshold,
+        "total_cost_jpy": total_cost_jpy,
+        "total_requests": total_requests
     }
 
 @app.post("/check_high_cost_operation")
 def check_operation(estimated_cost_jpy: float, db: Session = Depends(get_db)):
-    """高コスト処理前に許可が可能か確認するエンドポイント"""
-    days_running = calculate_days_from_start(db)
+    install_date_str = get_install_date(db)
+    days_running = calculate_days_from_start(install_date_str)
     special_day = is_special_day(days_running)
     current_cost_jpy = usage_adapter.get_todays_cost_jpy()
     
