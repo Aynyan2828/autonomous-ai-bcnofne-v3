@@ -2,10 +2,12 @@ import os
 import sys
 import psutil
 import httpx
+import asyncio
 from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from contextlib import asynccontextmanager
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -63,6 +65,77 @@ def set_system_state(db: Session, key: str, value: str):
     else:
         db.add(SystemState(key=key, value=value))
     db.commit()
+
+# --- Autonomous Thinking Loop ---
+
+async def proactive_thinking_loop():
+    """
+    Autonomous AI thinking loop (proactive mode).
+    Periodically checks if the AI should say something or ask for permission.
+    """
+    # 起動直後の安定待ち
+    await asyncio.sleep(10)
+    
+    db = SessionLocal()
+    try:
+        while True:
+            # Check ship mode
+            mode = get_system_state(db, "ship_mode", ShipMode.PORT.value)
+            ai_status = get_system_state(db, "ai_status", "RUNNING")
+            
+            if mode == ShipMode.SAIL.value and ai_status == "RUNNING":
+                # Get current task for context
+                cur_task = get_system_state(db, "ai_target_goal", "System Monitoring")
+                admin_id = os.getenv("LINE_ADMIN_USER_ID", "")
+
+                # 1. Check for high CPU temp
+                try:
+                    with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                        cpu_temp = int(f.read()) / 1000.0
+                        if cpu_temp > 70.0:
+                            msg = f"マスター、機関温度が {cpu_temp:.1f}C まで上がっとうよ！自律判断で冷却ファンを最強にしてもよか？（返信で許可してね）"
+                            if admin_id:
+                                await send_push(admin_id, msg)
+                except:
+                    pass
+                
+                # 2. Simulated Proactive Question (Randomly or based on time)
+                # In production, this would be an LLM-generated reflection on recent data
+                import random
+                if random.random() < 0.3: # 30% chance each loop
+                    questions = [
+                        f"現在「{cur_task}」中やけど、特に異常はなかよ。このまま進めてよか？",
+                        "マスター、次の航海計画（タスク）について相談したかことがあっとやけど、今よか？",
+                        "ログを分析した結果、バックアップを今のうちに取っといたほうがよかっちゃないかな？って思ったばい。許可してくれん？",
+                        "記録領域（SSD）に少し空きが増えたけん、整理整頓はバッチリばい！"
+                    ]
+                    if admin_id:
+                        await send_push(admin_id, random.choice(questions))
+                
+                # Update OLED track
+                set_system_state(db, "ai_target_goal", cur_task)
+                
+            await asyncio.sleep(600)  # 10分ごとに思考
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        print(f"Thinking loop error: {e}")
+    finally:
+        db.close()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: 自律思考ループを開始
+    task = asyncio.create_task(proactive_thinking_loop())
+    yield
+    # Shutdown: ループを停止
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+app.router.lifespan_context = lifespan
 
 # --- Command Handlers ---
 

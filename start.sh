@@ -11,8 +11,12 @@ echo "====================================="
 echo " Exploring Network for IPs...        "
 echo "====================================="
 
-# Get real LAN IP (exclude loopback and Tailscale 100.x)
-LOCAL_IP=$(hostname -I | tr ' ' '\n' | grep -v '^100\.' | grep -v '^127\.' | head -n 1)
+# Get real LAN IP (primary interface used for internet)
+LOCAL_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
+if [ -z "$LOCAL_IP" ]; then
+    # Fallback to general hostname -I if no route (offline/local only)
+    LOCAL_IP=$(hostname -I | awk '{print $1}')
+fi
 echo "FOUND LOCAL IP: ${LOCAL_IP}"
 
 # Get Tailscale IP
