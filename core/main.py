@@ -112,6 +112,12 @@ async def proactive_thinking_loop():
             
             # SAILモードかつ稼働中のみ自律思考を行う
             if mode == ShipMode.SAIL.value and ai_status == "RUNNING":
+                # 自律思考が有効かチェック
+                proactive_enabled = get_system_state(db, "proactive_enabled", "ON")
+                if proactive_enabled != "ON":
+                    await asyncio.sleep(60)
+                    continue
+
                 admin_id = os.getenv("LINE_ADMIN_USER_ID", "")
                 
                 # 1. 現状の収集
@@ -408,6 +414,12 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         return
     elif text == "autonomous off":
         await handle_state_change(db, payload.reply_token, "ship_mode", ShipMode.PORT.value, "PORTモード(待機)に戻ったよ。")
+        return
+    elif text == "自律停止":
+        await handle_state_change(db, payload.reply_token, "proactive_enabled", "OFF", "了解。自発的な話しかけを一時停止するね。")
+        return
+    elif text == "自律再開":
+        await handle_state_change(db, payload.reply_token, "proactive_enabled", "ON", "自律思考を再開したよ！また何か気づいたら教えるね。")
         return
     elif text.startswith("voice mode"):
         parts = text.split()
