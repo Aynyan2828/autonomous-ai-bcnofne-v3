@@ -324,9 +324,9 @@ def update_oled(db: Session):
     except:
         disk_pct = 0.0
     
-    # Network info from environment
-    ip = os.environ.get("HOST_IP", "??") 
-    ts_ip = os.environ.get("TAILSCALE_IP", "??")
+    # Network info from DB (updated by core on startup)
+    ip = get_system_state_val(db, "HOST_IP", "??") 
+    ts_ip = get_system_state_val(db, "TAILSCALE_IP", "??")
     
     # Webhook URL from DB (updated by start.sh)
     webhook_url = get_system_state_val(db, "last_webhook_url", "")

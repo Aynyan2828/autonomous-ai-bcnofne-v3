@@ -43,6 +43,20 @@ def set_system_state_helper(key: str, value: str):
     finally:
         db.close()
 
+async def send_push_notification(text: str):
+    """LINE 経由でマスターに通知を送る"""
+    admin_id = os.getenv("LINE_ADMIN_USER_ID")
+    if not admin_id:
+        logger.warn("LINE_ADMIN_USER_ID not set, skipping push notification")
+        return
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post("http://line-gateway:8001/api/v1/push", 
+                             json={"user_id": admin_id, "text": text},
+                             timeout=5.0)
+        except Exception as e:
+            logger.error(f"Failed to send push notification: {e}")
+
 class ApplyRequest(BaseModel):
     proposal_id: str
 
@@ -65,6 +79,7 @@ async def sync_repository():
         
         if res.returncode == 0:
             logger.info("Git pull completed successfully.")
+            await send_push_notification("マスター、最新の魂（コード）の同期が完了したばい！変更を反映させるには「再起動」って指示してね。")
             return {
                 "status": "success",
                 "message": "魂（コード）の同期が完了したばい！最新の状態になったよ。",
@@ -148,6 +163,7 @@ async def execute_apply(proposal_id: str):
             await client.patch(f"{MEMORY_SERVICE_URL}/proposals/{proposal_id}", json={"status": "APPLIED"})
         
         logger.info(f"Apply completed for {proposal_id}. Awaiting service restart...")
+        await send_push_notification(f"マスター、改修案 {proposal_id} の整備（適用）が完了したばい！正常に反映されたけん、安心してね。")
         
         # 5. 自身の再起動は Compose 連携が必要だが、ここではログに残す
         # 実際には core 等が検知して docker compose restart するか、

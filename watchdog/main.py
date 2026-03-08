@@ -1,7 +1,8 @@
 import os
 import asyncio
 import httpx
-from fastapi import FastAPI
+import docker
+from fastapi import FastAPI, BackgroundTasks
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
 
@@ -14,7 +15,7 @@ from shared.logger import ShipLogger
 
 logger = ShipLogger("watchdog")
 
-app = FastAPI(title="shipOS Watchdog")
+app = FastAPI(title="BCNOFNe Watchdog")
 
 SERVICES_TO_MONITOR = [
     {"name": "core", "url": "http://core:8000/health"},
@@ -50,6 +51,28 @@ async def monitor_services():
             # 1分おきに監視
             await asyncio.sleep(60)
 
+async def execute_restart():
+    """実際のコンテナ再起動処理"""
+    logger.info("Executing system-wide container restart...")
+    try:
+        client = docker.from_env()
+        # shipos- で始まるコンテナを全て取得
+        containers = client.containers.list(all=True, filters={"name": "shipos-"})
+        
+        # 自身 (watchdog) 以外を先に再起動
+        for container in containers:
+            if "watchdog" in container.name:
+                continue
+            logger.info(f"Restarting container: {container.name}")
+            container.restart(timeout=10)
+        
+        # 最後に自身を再起動
+        logger.info("Restarting watchdog last...")
+        watchdog = client.containers.get("shipos-watchdog")
+        watchdog.restart(timeout=5)
+    except Exception as e:
+        logger.error(f"Restart execution failed: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = asyncio.create_task(monitor_services())
@@ -61,3 +84,12 @@ app.router.lifespan_context = lifespan
 @app.get("/health")
 def health_check():
     return {"status": "ok", "service": "watchdog"}
+
+@app.post("/restart")
+async def restart_system(background_tasks: BackgroundTasks):
+    """
+    全コンテナを再起動するエンドポイント
+    """
+    logger.info("Restart request received.")
+    background_tasks.add_task(execute_restart)
+    return {"status": "accepted", "message": "全システムを再起動するばい。ちょっと待っとってね。"}

@@ -3,6 +3,7 @@ import sys
 import psutil
 import httpx
 import asyncio
+import socket
 from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, BackgroundTasks
 from pydantic import BaseModel
@@ -222,10 +223,30 @@ async def lifespan(app: FastAPI):
     logger.info(" BCNOFNe v3 Starting (Outward Bound) ")
     logger.info("====================================")
     
-    # 1. Start thinking loop
     thinking_task = asyncio.create_task(proactive_thinking_loop())
     
-    # 2. Fetch billing summary and notify
+    # 2. IP Address Discovery (Migrated from start.sh)
+    db = SessionLocal()
+    try:
+        ips = {"HOST_IP": "NOT_FOUND", "TAILSCALE_IP": "NOT_FOUND"}
+        for interface, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET:
+                    ip = addr.address
+                    if ip.startswith("100."): # Tailscale
+                        ips["TAILSCALE_IP"] = ip
+                    elif not ip.startswith("127.") and not ip.startswith("172."): # LAN
+                        ips["HOST_IP"] = ip
+        
+        set_system_state(db, "HOST_IP", ips["HOST_IP"])
+        set_system_state(db, "TAILSCALE_IP", ips["TAILSCALE_IP"])
+        logger.info(f"Interfaces discovered: HOST={ips['HOST_IP']}, TS={ips['TAILSCALE_IP']}")
+    except Exception as e:
+        logger.error(f"IP discovery failed: {e}")
+    finally:
+        db.close()
+
+    # 3. Fetch billing summary and notify
     admin_id = os.getenv("LINE_ADMIN_USER_ID", "")
     max_startup_attempts = 15 # より粘り強く (合計約2分強待機)
     for attempt in range(max_startup_attempts):
@@ -519,6 +540,17 @@ async def handle_sync_command(reply_token: str):
         logger.error(f"Sync command error: {e}")
         await send_reply(reply_token, f"同期中にエラーが起きたばい。後でもう一回試してみて：{e}")
 
+async def handle_restart_command(reply_token: str):
+    """システム全体を再起動する指示を watchdog へ送る"""
+    await send_reply(reply_token, "了解！システム全体を再起動（リブート）して、最新の状態にするばい。再起動中はしばらく反応できんくなるけん、ちょっと待っとってね。全速前進！🚢💨")
+    try:
+        async with httpx.AsyncClient() as client:
+            # watchdog を叩いて再起動をキック
+            await client.post("http://watchdog:8005/restart", timeout=5.0)
+    except Exception as e:
+        logger.error(f"Failed to trigger restart: {e}")
+        # 再起動が失敗した旨は LINE ゲートウェイが生きていれば届く
+
 # --- Main Message Endpoint ---
 
 @app.post("/api/v1/message")
@@ -576,6 +608,9 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         return
     elif text == "同期" or text == "アップデート":
         await handle_sync_command(payload.reply_token)
+        return
+    elif text == "再起動" or text == "リスタート":
+        await handle_restart_command(payload.reply_token)
         return
 
     # 改修案・承認系
