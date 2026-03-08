@@ -18,4 +18,5 @@ COPY shared/ ./shared/
 COPY oled-controller/ ./oled-controller/
 
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 CMD ["uvicorn", "oled-controller.main:app", "--host", "0.0.0.0", "--port", "8011"]

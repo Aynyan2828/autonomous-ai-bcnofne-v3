@@ -19,9 +19,11 @@ try:
     import adafruit_ssd1306
     from PIL import Image, ImageDraw, ImageFont
     HARDWARE_AVAILABLE = True
-except ImportError:
+except Exception as e:
+    import traceback
     HARDWARE_AVAILABLE = False
-    print("[OLED/FAN] Hardware libraries not available. Running in stub mode.")
+    print(f"[OLED/FAN] Hardware libraries not available. Running in stub mode. ({e})")
+    traceback.print_exc()
 
 app = FastAPI(title="shipOS OLED & Fan Controller")
 
