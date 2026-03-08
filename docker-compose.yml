@@ -138,6 +138,7 @@ services:
       - ./data:/app/data
       - ./.env:/app/.env:ro
       - /sys:/sys:ro
+      - ./oled_128x64_resize_dither.png:/app/oled_128x64_resize_dither.png:ro
 
 networks:
   shipos-net:

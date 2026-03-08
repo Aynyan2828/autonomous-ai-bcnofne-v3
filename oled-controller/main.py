@@ -96,16 +96,21 @@ def get_db():
     finally:
         db.close()
 
-def setup_hardware():
-    global oled_display, fan_is_on
-    if not HARDWARE_AVAILABLE:
-        return
+LOGO_PATH = "/app/oled_128x64_resize_dither.png"
 
 def show_boot_animation():
-    """Ship-like boot sequence animation."""
+    """Ship-like boot sequence animation with logo and progress bar."""
     if not HARDWARE_AVAILABLE or not oled_display:
         return
     
+    # Load Logo
+    logo = None
+    if os.path.exists(LOGO_PATH):
+        try:
+            logo = Image.open(LOGO_PATH).convert("1")
+        except Exception as e:
+            logger.error(f"Failed to load logo: {e}")
+
     checks = [
         "CPU TEMPERATURE",
         "I2C BUS STATUS",
@@ -115,29 +120,89 @@ def show_boot_animation():
         "SHIPOS KERNEL "
     ]
     
+    total_checks = len(checks)
     for i, label in enumerate(checks):
         if not oled_display:
             break
-        image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+        
+        # 起動イメージの作成
+        if logo:
+            image = logo.copy()
+        else:
+            image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+            
         draw = ImageDraw.Draw(image)
-        draw.text((0, 0), "--- SYSTEM CHECK ---", fill=255)
-        # Show all previous OKs
-        for j in range(i + 1):
-            draw.text((0, 10 + j*8), f"[ OK ] {checks[j]}", fill=255)
+        
+        # テキストの視認性確保のために背景を少し黒く塗る
+        draw.rectangle((0, 0, 110, 10), fill=0)
+        draw.text((0, 0), "--- SYSTEM CHECK ---", font=ImageFont.load_default(), fill=255)
+        
+        # 最新のチェック項目を1つだけ出す（ロゴを隠しすぎないように）
+        y_pos = 12
+        draw.rectangle((0, y_pos, 120, y_pos + 9), fill=0)
+        draw.text((0, y_pos), f"[ OK ] {checks[i]}", font=ImageFont.load_default(), fill=255)
+            
+        # プログレスバー（画面下部）
+        bar_y = 54
+        bar_h = 8
+        draw.rectangle((0, bar_y, OLED_WIDTH - 1, bar_y + bar_h), outline=255, fill=0)
+        progress_w = int((i + 1) / total_checks * (OLED_WIDTH - 4))
+        draw.rectangle((2, bar_y + 2, 2 + progress_w, bar_y + bar_h - 2), fill=255)
         
         oled_display.image(image)
         oled_display.show()
-        time.sleep(0.3)
+        time.sleep(0.5)
     
     # Final ready message
     if oled_display:
-        image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+        image = logo.copy() if logo else Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
         draw = ImageDraw.Draw(image)
-        draw.text((10, 25), "ALL SYSTEMS GREEN", fill=255)
-        draw.text((10, 35), "    OUTWARD BOUND", fill=255)
+        draw.rectangle((10, 20, 118, 45), fill=0, outline=255)
+        draw.text((15, 25), "ALL SYSTEMS GREEN", font=ImageFont.load_default(), fill=255)
+        draw.text((15, 35), "    OUTWARD BOUND", font=ImageFont.load_default(), fill=255)
         oled_display.image(image)
         oled_display.show()
-        time.sleep(1.0)
+        time.sleep(1.5)
+
+def show_shutdown_animation():
+    """Ship-like shutdown sequence animation (Return to port)."""
+    if not HARDWARE_AVAILABLE or not oled_display:
+        return
+
+    logo = None
+    if os.path.exists(LOGO_PATH):
+        try:
+            logo = Image.open(LOGO_PATH).convert("1")
+        except:
+            pass
+
+    # 1. 帰港メッセージを表示
+    for i in range(6):
+        image = logo.copy() if logo else Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+        draw = ImageDraw.Draw(image)
+        
+        if i % 2 == 0:
+            draw.rectangle((10, 20, 118, 45), fill=0, outline=255)
+            draw.text((15, 25), " RETURN TO PORT ", font=ImageFont.load_default(), fill=255)
+            draw.text((15, 35), " SHUTTING DOWN  ", font=ImageFont.load_default(), fill=255)
+            
+        oled_display.image(image)
+        oled_display.show()
+        time.sleep(0.5)
+
+    # 2. フェードアウト（上下から収束）
+    if logo:
+        image = logo.copy()
+        for y in range(0, OLED_HEIGHT // 2, 2):
+            draw = ImageDraw.Draw(image)
+            draw.line((0, y, OLED_WIDTH, y), fill=0)
+            draw.line((0, OLED_HEIGHT - 1 - y, OLED_WIDTH, OLED_HEIGHT - 1 - y), fill=0)
+            oled_display.image(image)
+            oled_display.show()
+            time.sleep(0.05)
+
+    oled_display.fill(0)
+    oled_display.show()
 
 def setup_hardware():
     global fan_is_on, oled_display
@@ -332,17 +397,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     task.cancel()
     if HARDWARE_AVAILABLE:
-        if oled_display:
-            # Shutdown message
-            image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
-            draw = ImageDraw.Draw(image)
-            draw.text((20, 20), "SHUTTING DOWN...", fill=255)
-            draw.text((20, 35), " RETURN TO PORT ", fill=255)
-            oled_display.image(image)
-            oled_display.show()
-            time.sleep(2)
-            oled_display.fill(0)
-            oled_display.show()
+        show_shutdown_animation()
         GPIO.cleanup()
 
 app.router.lifespan_context = lifespan
