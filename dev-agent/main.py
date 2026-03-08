@@ -197,31 +197,38 @@ async def process_suggestion(suggestion):
     if not files:
         return
 
-    # 1. Workspace の準備 (src からコピー)
+    # 1. Workspace の準備 (既存ファイルがあれば src からコピー、なければ新規作成の準備)
     for f in files:
         src_path = os.path.join(SRC_DIR, f)
         dest_path = os.path.join(WORKSPACE_DIR, f)
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         if os.path.exists(src_path):
-            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             shutil.copy2(src_path, dest_path)
+        else:
+            # 新規ファイルの場合は空ファイルを作成しておく
+            with open(dest_path, "w") as empty_f:
+                empty_f.write("")
+            logger.info(f"Prepared new file in workspace: {f}")
 
     # 2. 差分生成 (OpenAI にコード修正を依頼)
-    # ここでは簡易化のため、各ファイルに対して修正を依頼する
+    full_diff = ""
     for f in files:
         work_path = os.path.join(WORKSPACE_DIR, f)
-        if not os.path.exists(work_path): continue
         
-        with open(work_path, "r") as f_in:
-            original_code = f_in.read()
+        original_code = ""
+        if os.path.exists(work_path):
+            with open(work_path, "r") as f_in:
+                original_code = f_in.read()
             
         edit_prompt = f"""
 ファイル: {f}
 修正計画: {suggestion['plan']}
 
 現在のコードを読み、計画に沿って修正した「完全な新しいコード」を出力してください。
+ファイルが新規作成の場合は、適切な内容を作成してください。
 余計な解説は不要です。コードのみ出力してください。
 
-【元のコード】
+【元のコード (空の場合は新規作成)】
 {original_code}
 """
         res = await openai_client.chat.completions.create(
@@ -235,6 +242,11 @@ async def process_suggestion(suggestion):
             
         with open(work_path, "w") as f_out:
             f_out.write(new_code)
+        
+        # 簡易的なdiff記録
+        full_diff += f"--- {f} (original)\n+++ {f} (updated)\n"
+        full_diff += f"@@ -1,{len(original_code.splitlines())} +1,{len(new_code.splitlines())} @@\n"
+        full_diff += "(Code updated/created)\n\n"
 
     # 3. テスト (Syntax Check)
     test_report = ""
@@ -257,6 +269,7 @@ async def process_suggestion(suggestion):
             "description": suggestion["description"],
             "plan_json": json.dumps({"files": files, "plan": suggestion["plan"]}),
             "files_affected": ", ".join(files),
+            "diff_content": full_diff,
             "test_results": test_report
         })
 
