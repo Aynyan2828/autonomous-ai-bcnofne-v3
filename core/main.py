@@ -502,7 +502,8 @@ async def handle_proposal_reject(reply_token: str, prop_id: str):
 @app.post("/api/v1/message")
 async def receive_message(payload: MessagePayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """LINE等から送られてきたテキストを解釈し、対応する処理や他サービスへルーティングする"""
-    text = payload.text.strip().lower()
+    raw_text = payload.text.strip()
+    text = raw_text.lower()
 
     # 安全系コマンド（最優先）
     if text == "stop":
@@ -555,15 +556,15 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         await handle_proposals_list(payload.reply_token)
         return
     elif text.startswith("承認 "):
-        prop_id = text.split()[1]
+        prop_id = raw_text.split()[1].upper()
         await handle_proposal_approve(payload.reply_token, prop_id)
         return
     elif text.startswith("却下 "):
-        prop_id = text.split()[1]
+        prop_id = raw_text.split()[1].upper()
         await handle_proposal_reject(payload.reply_token, prop_id)
         return
     elif text.startswith("詳細 "):
-        prop_id = text.split()[1]
+        prop_id = raw_text.split()[1].upper()
         await handle_proposal_detail(payload.reply_token, prop_id)
         return
 
