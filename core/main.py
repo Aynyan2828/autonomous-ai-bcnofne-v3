@@ -455,13 +455,13 @@ async def handle_proposal_detail(reply_token: str, prop_id: str):
             r = await client.get(f"http://memory-service:8003/proposals/{prop_id}")
             if r.status_code == 200:
                 p = r.json()
-                text = f"【改修案詳細: {p['id']}】\n"
-                text += f"件名: {p['title']}\n"
-                text += f"内容: {p['description']}\n"
-                if p['files_affected']:
-                    text += f"対象: {p['files_affected']}\n"
-                if p['test_results']:
-                    text += f"\n【テスト結果】\n{p['test_results']}\n"
+                text = f"【改修案詳細: {p.get('id', 'N/A')}】\n"
+                text += f"件名: {p.get('title', 'N/A')}\n"
+                text += f"内容: {p.get('description', 'N/A')}\n"
+                if p.get('files_affected'):
+                    text += f"対象: {p.get('files_affected')}\n"
+                if p.get('test_results'):
+                    text += f"\n【テスト結果】\n{p.get('test_results')}\n"
                 await send_reply(reply_token, text)
             else:
                 await send_reply(reply_token, f"提案 {prop_id} が見つからんやった。")

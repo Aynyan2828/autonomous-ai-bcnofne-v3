@@ -45,20 +45,24 @@ class ProposalCreate(BaseModel):
     id: str
     title: str
     description: str
-    plan_json: str = None
-    files_affected: str = None
-    diff_content: str = None
+    plan_json: str | None = None
+    files_affected: str | None = None
+    diff_content: str | None = None
+    test_results: str | None = None
 
 class ProposalUpdate(BaseModel):
-    status: str = None
-    test_results: str = None
-    diff_content: str = None
+    status: str | None = None
+    test_results: str | None = None
+    diff_content: str | None = None
 
 class ProposalResponse(BaseModel):
     id: str
     title: str
     description: str
-    files_affected: str = None
+    files_affected: str | None = None
+    plan_json: str | None = None
+    diff_content: str | None = None
+    test_results: str | None = None
     status: str
     created_at: datetime
 
@@ -150,6 +154,7 @@ def create_proposal(proposal: ProposalCreate, db: Session = Depends(get_db)):
         plan_json=proposal.plan_json,
         files_affected=proposal.files_affected,
         diff_content=proposal.diff_content,
+        test_results=proposal.test_results,
         status=ProposalStatus.PENDING.value
     )
     db.add(db_proposal)
