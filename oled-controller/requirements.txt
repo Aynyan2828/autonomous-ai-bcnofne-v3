@@ -7,3 +7,4 @@ RPi.GPIO
 adafruit-circuitpython-ssd1306
 adafruit-blinka
 Pillow
+httpx

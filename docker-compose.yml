@@ -1,4 +1,4 @@
-version: '3.8'
+# ShipOS v3 Docker Compose Configuration
 
 x-common: &common
   restart: unless-stopped
