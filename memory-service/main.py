@@ -49,6 +49,7 @@ class ProposalCreate(BaseModel):
     files_affected: str | None = None
     diff_content: str | None = None
     test_results: str | None = None
+    status: str | None = None
 
 class ProposalUpdate(BaseModel):
     status: str | None = None
@@ -162,12 +163,12 @@ def create_proposal(proposal: ProposalCreate, db: Session = Depends(get_db)):
         files_affected=proposal.files_affected,
         diff_content=proposal.diff_content,
         test_results=proposal.test_results,
-        status=ProposalStatus.PENDING.value
+        status=proposal.status or ProposalStatus.PENDING.value
     )
     db.add(db_proposal)
     db.commit()
     db.refresh(db_proposal)
-    logger.info(f"New improvement proposal created: {proposal.id}")
+    logger.info(f"New improvement proposal created: {proposal.id} (Status: {db_proposal.status})")
     return db_proposal
 
 @app.get("/proposals/", response_model=List[ProposalResponse])

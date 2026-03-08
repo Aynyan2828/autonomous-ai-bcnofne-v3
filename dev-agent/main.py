@@ -305,6 +305,11 @@ async def process_suggestion(suggestion):
 
     # 4. 提案の保存
     async with httpx.AsyncClient() as client:
+        status = "PENDING" if success else "FAILED"
+        if not success:
+            logger.warn(f"Auto-discarding proposal {prop_id} due to syntax errors.")
+            set_system_state_helper("ai_target_goal", f"改修案 {prop_id} はエラーで廃案になったばい")
+
         await client.post(f"{MEMORY_SERVICE_URL}/proposals/", json={
             "id": prop_id,
             "title": suggestion["title"],
@@ -312,7 +317,8 @@ async def process_suggestion(suggestion):
             "plan_json": json.dumps({"files": files, "plan": suggestion["plan"]}),
             "files_affected": ", ".join(files),
             "diff_content": full_diff,
-            "test_results": test_report
+            "test_results": test_report,
+            "status": status
         })
 
     # 5. LINE 通知を core に依頼
