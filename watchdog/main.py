@@ -10,6 +10,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.database import SessionLocal
 from shared.models import SystemLog
+from shared.logger import ShipLogger
+
+logger = ShipLogger("watchdog")
 
 app = FastAPI(title="shipOS Watchdog")
 
@@ -22,13 +25,12 @@ SERVICES_TO_MONITOR = [
 ]
 
 def log_event(level: str, message: str):
-    db = SessionLocal()
-    try:
-        log_entry = SystemLog(service_name="watchdog", level=level, message=message)
-        db.add(log_entry)
-        db.commit()
-    finally:
-        db.close()
+    if level == "INFO":
+        logger.info(message)
+    elif level == "WARN":
+        logger.warn(message)
+    elif level == "CRITICAL" or level == "ERROR":
+        logger.error(message)
 
 async def monitor_services():
     async with httpx.AsyncClient() as client:

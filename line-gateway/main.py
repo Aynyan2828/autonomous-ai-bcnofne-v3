@@ -5,6 +5,12 @@ from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from pydantic import BaseModel
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from shared.logger import ShipLogger
+
+logger = ShipLogger("line-gateway")
 
 app = FastAPI(title="shipOS LINE Gateway")
 
@@ -64,7 +70,7 @@ async def forward_to_core(text: str, user_id: str, reply_token: str):
                 timeout=5.0
             )
     except Exception as e:
-        print(f"Failed to forward message to core: {e}")
+        logger.error(f"Failed to forward message to core: {e}")
 
 @app.post("/api/v1/reply")
 def reply_message(reply_token: str, text: str):

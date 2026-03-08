@@ -10,6 +10,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.database import SessionLocal
 from shared.models import SystemState, SystemLog
+from shared.logger import ShipLogger
+
+logger = ShipLogger("billing-guard")
 
 # --- Dummy Usage Provider Adapter ---
 class OpenAIApiUsageAdapter:
@@ -36,9 +39,12 @@ def get_db():
         db.close()
 
 def log_event(db: Session, level: str, message: str):
-    log_entry = SystemLog(service_name="billing-guard", level=level, message=message)
-    db.add(log_entry)
-    db.commit()
+    if level == "INFO":
+        logger.info(message)
+    elif level == "WARN":
+        logger.warn(message)
+    elif level == "CRITICAL" or level == "ERROR":
+        logger.critical(message)
 
 def calculate_days_from_start(db: Session) -> int:
     """システムのインストール日からの日数を計算"""

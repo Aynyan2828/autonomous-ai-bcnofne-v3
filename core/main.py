@@ -14,6 +14,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared import init_db
 from shared.database import SessionLocal
 from shared.models import SystemState, ShipMode
+from shared.logger import ShipLogger
+
+# ロガーの初期化
+logger = ShipLogger("core")
 
 # アプリ起動時にデータベースを初期化（Phase 1用）
 init_db()
@@ -125,14 +129,67 @@ async def proactive_thinking_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: 自律思考ループを開始
-    task = asyncio.create_task(proactive_thinking_loop())
-    yield
-    # Shutdown: ループを停止
-    task.cancel()
+    # --- Startup Sequence ---
+    logger.info("====================================")
+    logger.info(" shipOS v3 Starting (Outward Bound) ")
+    logger.info("====================================")
+    
+    # 1. Start thinking loop
+    thinking_task = asyncio.create_task(proactive_thinking_loop())
+    
+    # 2. Fetch billing summary and notify
+    admin_id = os.getenv("LINE_ADMIN_USER_ID", "")
     try:
-        await task
-    except asyncio.CancelledError:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get("http://billing-guard:8002/status", timeout=5.0)
+            if resp.status_code == 200:
+                bill = resp.json()
+                msg = (f"【出航報告】shipOS 起動完了ばい！\n"
+                       f"本日累計: {bill['current_cost_jpy']}円\n"
+                       f"稼海日数: {bill['days_running']}日目\n"
+                       f"アラート: {bill['alert_level']}\n"
+                       f"全システム、オールグリーン。さあ、行きましょう！")
+                if admin_id:
+                    await send_push(admin_id, msg)
+                # Forward to Discord via logger
+                logger.warn(f"System Startup: {bill['current_cost_jpy']}円 accumulated today.")
+    except Exception as e:
+        logger.error(f"Startup billing check failed: {e}")
+
+    # 3. Startup Voice Announcement
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post("http://voice-router:8007/speak", 
+                             json={"text": "システム、オールグリーン。出航準備、完了したばい！"})
+    except:
+        pass
+
+    yield
+
+    # --- Shutdown Sequence ---
+    logger.info("====================================")
+    logger.info(" shipOS v3 Stopping (Returning)    ")
+    logger.info("====================================")
+    
+    # 1. Stop thinking loop
+    thinking_task.cancel()
+    
+    # 2. Final notification
+    closing_msg = "【帰港報告】本日の航海を終了します。システムを停止し、待機モードに入ります。お疲れ様でした！"
+    if admin_id:
+        try:
+            await send_push(admin_id, closing_msg)
+        except:
+            pass
+    logger.warn("System Shutdown Initiated.")
+
+    # 3. Shutdown Voice
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post("http://voice-router:8007/speak", 
+                             json={"text": "本日の航海、終了。お疲れ様でした、マスター。"})
+            await asyncio.sleep(2) # 再生待ち
+    except:
         pass
 
 app.router.lifespan_context = lifespan

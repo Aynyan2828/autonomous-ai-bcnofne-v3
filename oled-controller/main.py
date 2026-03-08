@@ -10,6 +10,9 @@ from contextlib import asynccontextmanager
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.database import SessionLocal
 from shared.models import SystemState, ShipMode
+from shared.logger import ShipLogger
+
+logger = ShipLogger("oled-controller")
 
 # OLED & Fan dependencies
 try:
@@ -98,6 +101,49 @@ def setup_hardware():
     if not HARDWARE_AVAILABLE:
         return
 
+def show_boot_animation():
+    """Ship-like boot sequence animation."""
+    if not HARDWARE_AVAILABLE or not oled_display:
+        return
+    
+    checks = [
+        "CPU TEMPERATURE",
+        "I2C BUS STATUS",
+        "FAN CONTROLLER",
+        "DATABASE CONN",
+        "NETWORK CONFIG",
+        "SHIPOS KERNEL "
+    ]
+    
+    for i, label in enumerate(checks):
+        if not oled_display:
+            break
+        image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+        draw = ImageDraw.Draw(image)
+        draw.text((0, 0), "--- SYSTEM CHECK ---", fill=255)
+        # Show all previous OKs
+        for j in range(i + 1):
+            draw.text((0, 10 + j*8), f"[ OK ] {checks[j]}", fill=255)
+        
+        oled_display.image(image)
+        oled_display.show()
+        time.sleep(0.3)
+    
+    # Final ready message
+    if oled_display:
+        image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+        draw = ImageDraw.Draw(image)
+        draw.text((10, 25), "ALL SYSTEMS GREEN", fill=255)
+        draw.text((10, 35), "    OUTWARD BOUND", fill=255)
+        oled_display.image(image)
+        oled_display.show()
+        time.sleep(1.0)
+
+def setup_hardware():
+    global fan_is_on, oled_display
+    if not HARDWARE_AVAILABLE:
+        return
+
     # Fan Setup
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(FAN_PIN, GPIO.OUT)
@@ -110,8 +156,10 @@ def setup_hardware():
         oled_display = adafruit_ssd1306.SSD1306_I2C(OLED_WIDTH, OLED_HEIGHT, i2c, addr=0x3C)
         oled_display.fill(0)
         oled_display.show()
+        # Start animation
+        show_boot_animation()
     except Exception as e:
-        print(f"Failed to initialize OLED: {e}")
+        logger.error(f"Failed to initialize OLED: {e}")
         oled_display = None
 
 def get_cpu_temp():
@@ -278,14 +326,24 @@ async def hardware_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup
     task = asyncio.create_task(hardware_loop())
     yield
+    # Shutdown
     task.cancel()
     if HARDWARE_AVAILABLE:
-        GPIO.cleanup()
         if oled_display:
+            # Shutdown message
+            image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+            draw = ImageDraw.Draw(image)
+            draw.text((20, 20), "SHUTTING DOWN...", fill=255)
+            draw.text((20, 35), " RETURN TO PORT ", fill=255)
+            oled_display.image(image)
+            oled_display.show()
+            time.sleep(2)
             oled_display.fill(0)
             oled_display.show()
+        GPIO.cleanup()
 
 app.router.lifespan_context = lifespan
 
