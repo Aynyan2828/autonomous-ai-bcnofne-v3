@@ -15,8 +15,10 @@ from openai import AsyncOpenAI
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared import init_db
 from shared.logger import ShipLogger
+from shared.database import SessionLocal
+from shared.models import SystemState
 
-VERSION = "v3.1.3-debug"
+VERSION = "v3.1.4-debug"
 print(f"AYN {VERSION} STARTING... (CWD: {os.getcwd()})")
 
 logger = ShipLogger("dev-agent")
@@ -26,6 +28,20 @@ openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 SRC_DIR = "/app/src"
 WORKSPACE_DIR = "/app/workspace"
 MEMORY_SERVICE_URL = "http://memory-service:8003"
+
+def set_system_state_helper(key: str, value: str):
+    db = SessionLocal()
+    try:
+        state = db.query(SystemState).filter_by(key=key).first()
+        if state:
+            state.value = value
+        else:
+            db.add(SystemState(key=key, value=value))
+        db.commit()
+    except Exception as e:
+        logger.error(f"Failed to set system state: {e}")
+    finally:
+        db.close()
 
 class ApplyRequest(BaseModel):
     proposal_id: str
@@ -46,6 +62,7 @@ async def apply_proposal(proposal_id: str, background_tasks: BackgroundTasks):
 async def execute_apply(proposal_id: str):
     """本番環境への反映（Apply）を実行"""
     logger.info(f"Starting Apply for proposal: {proposal_id}")
+    set_system_state_helper("ai_target_goal", f"{proposal_id}ば適用するけん！")
     
     try:
         # 1. 提案内容の取得
@@ -153,6 +170,7 @@ async def safe_get_memory_summary(client):
 async def run_autonomous_observation():
     """観測と改善案の生成"""
     logger.info("Observing system for improvements...")
+    set_system_state_helper("ai_target_goal", "システムを観測中ばい...")
     
     # 1. データの収集
     async with httpx.AsyncClient() as client:
@@ -215,6 +233,7 @@ async def process_suggestion(suggestion):
     """提案された内容を実際に workspace で実装・テストする"""
     prop_id = suggestion["id"]
     logger.info(f"Processing suggestion: {prop_id} - {suggestion['title']}")
+    set_system_state_helper("ai_target_goal", f"改修案を作成中ばい: {suggestion['title'][:10]}...")
     
     files = suggestion.get("files", [])
     if not files:
