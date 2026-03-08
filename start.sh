@@ -9,7 +9,7 @@ echo "====================================="
 echo " Starting shipOS Docker containers... "
 echo "====================================="
 docker compose pull
-docker compose up -d
+docker compose up -d --build
 
 # 2. Ngrok の起動 (バックグラウンドでポート8001: line-gateway を公開)
 echo "====================================="
