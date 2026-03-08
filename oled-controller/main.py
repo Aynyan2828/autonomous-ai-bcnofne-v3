@@ -120,6 +120,8 @@ def show_boot_animation():
                 logger.error(f"OLED: Failed to open logo at {p}: {e}")
         else:
             logger.info(f"OLED: Logo not found at {p}")
+
+    checks = [
         "CPU TEMPERATURE",
         "I2C BUS STATUS",
         "FAN CONTROLLER",
