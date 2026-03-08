@@ -503,7 +503,9 @@ async def handle_proposal_reject(reply_token: str, prop_id: str):
 async def receive_message(payload: MessagePayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """LINE等から送られてきたテキストを解釈し、対応する処理や他サービスへルーティングする"""
     raw_text = payload.text.strip()
-    text = raw_text.lower()
+    # 全角スペースを半角に変換して処理しやすくする
+    text_canonical = raw_text.replace("　", " ")
+    text = text_canonical.lower()
 
     # 安全系コマンド（最優先）
     if text == "stop":
@@ -556,17 +558,23 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         await handle_proposals_list(payload.reply_token)
         return
     elif text.startswith("承認 "):
-        prop_id = raw_text.split()[1].upper()
-        await handle_proposal_approve(payload.reply_token, prop_id)
-        return
+        parts = text_canonical.split()
+        if len(parts) > 1:
+            prop_id = parts[1].upper()
+            await handle_proposal_approve(payload.reply_token, prop_id)
+            return
     elif text.startswith("却下 "):
-        prop_id = raw_text.split()[1].upper()
-        await handle_proposal_reject(payload.reply_token, prop_id)
-        return
+        parts = text_canonical.split()
+        if len(parts) > 1:
+            prop_id = parts[1].upper()
+            await handle_proposal_reject(payload.reply_token, prop_id)
+            return
     elif text.startswith("詳細 "):
-        prop_id = raw_text.split()[1].upper()
-        await handle_proposal_detail(payload.reply_token, prop_id)
-        return
+        parts = text_canonical.split()
+        if len(parts) > 1:
+            prop_id = parts[1].upper()
+            await handle_proposal_detail(payload.reply_token, prop_id)
+            return
 
     # ---- AI 通常会話（OpenAI 連携） ----
     ai_status = get_system_state(db, "ai_status", "RUNNING")
