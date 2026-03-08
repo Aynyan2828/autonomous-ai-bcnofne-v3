@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+sqlalchemy
+httpx
+openai
+psutil
+python-dotenv
+pydantic

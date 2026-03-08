@@ -95,6 +95,30 @@ def set_system_state(db: Session, key: str, value: str):
         db.add(SystemState(key=key, value=value))
     db.commit()
 
+async def get_brain_context() -> str:
+    """memory-service から現在の多層メモリの要約を取得する"""
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.get("http://memory-service:8003/summary", timeout=5.0)
+            if r.status_code == 200:
+                return r.json().get("summary", "")
+        except Exception as e:
+            logger.error(f"Failed to fetch brain summary: {e}")
+    return ""
+
+async def record_working_memory(topic: str, content: str):
+    """作業用メモリ (WORKING) に記録する"""
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post("http://memory-service:8003/memories/", json={
+                "topic": topic,
+                "content": content,
+                "layer": "WORKING",
+                "importance": 1
+            }, timeout=3.0)
+        except Exception as e:
+            logger.error(f"Failed to record working memory: {e}")
+
 # --- Autonomous Thinking Loop ---
 
 async def proactive_thinking_loop():
@@ -133,10 +157,16 @@ async def proactive_thinking_loop():
                 logs = db.query(SystemLog).order_by(SystemLog.created_at.desc()).limit(10).all()
                 log_context = "\n".join([f"[{l.service_name}] {l.message}" for l in reversed(logs)])
 
+                # 記憶（脳内コンテキスト）の取得
+                brain_context = await get_brain_context()
+
                 # 2. OpenAI による分析
                 analysis_prompt = f"""
-あなたは AYN です。現在の艦内（システム）状況を報告します。
+あなたは AYN です。現在の艦内（システム）状況と、あなたの脳内コンテキスト（記憶）を報告します。
 これを見て、マスターに「報告すべき異常」や「提案すべき改善案」、あるいは「ただの世間話」を自律的に判断して発信してください。
+
+【現在の脳内コンテキスト】
+{brain_context}
 
 【システムメトリクス】
 - CPU使用率: {cpu}%
@@ -396,6 +426,77 @@ async def handle_state_change(db: Session, reply_token: str, key: str, value: st
     set_system_state(db, key, value)
     await send_reply(reply_token, msg)
 
+# --- Proposal Handlers ---
+
+async def handle_proposals_list(reply_token: str):
+    """保留中の改善提案一覧を表示"""
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.get("http://memory-service:8003/proposals/", params={"status": "PENDING"})
+            if r.status_code == 200:
+                proposals = r.json()
+                if not proposals:
+                    await send_reply(reply_token, "今は保留中の改修案はなかよ。順風満帆ばい！")
+                else:
+                    text = "【保留中の改修案】\n"
+                    for p in proposals:
+                        text += f"・{p['id']}: {p['title']}\n"
+                    text += "\n「承認 <ID>」で実行、「詳細 <ID>」で中身ば確認できるよ。"
+                    await send_reply(reply_token, text)
+            else:
+                await send_reply(reply_token, "改修案の取得に失敗したばい。")
+        except Exception as e:
+            await send_reply(reply_token, f"通信エラーが発生したばい: {e}")
+
+async def handle_proposal_detail(reply_token: str, prop_id: str):
+    """提案の詳細（修正計画やリスク）を表示"""
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.get(f"http://memory-service:8003/proposals/{prop_id}")
+            if r.status_code == 200:
+                p = r.json()
+                text = f"【改修案詳細: {p['id']}】\n"
+                text += f"件名: {p['title']}\n"
+                text += f"内容: {p['description']}\n"
+                if p['files_affected']:
+                    text += f"対象: {p['files_affected']}\n"
+                if p['test_results']:
+                    text += f"\n【テスト結果】\n{p['test_results']}\n"
+                await send_reply(reply_token, text)
+            else:
+                await send_reply(reply_token, f"提案 {prop_id} が見つからんやった。")
+        except Exception as e:
+            await send_reply(reply_token, f"通信エラーばい: {e}")
+
+async def handle_proposal_approve(reply_token: str, prop_id: str):
+    """マスターの承認を受けてステータスを変更し、dev-agent に適用を指示"""
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.patch(f"http://memory-service:8003/proposals/{prop_id}", json={"status": "APPROVED"})
+            if r.status_code == 200:
+                # dev-agent に伝達
+                try:
+                    await client.post(f"http://dev-agent:8012/apply/{prop_id}", timeout=5.0)
+                except Exception as e:
+                    logger.error(f"Failed to notify dev-agent: {e}")
+                await send_reply(reply_token, f"了解！改修案 {prop_id} の出航（適用）を許可したばい。整備を開始するけん、ちょっと待っとってね！")
+            else:
+                await send_reply(reply_token, "承認処理に失敗したばい。")
+        except Exception as e:
+            await send_reply(reply_token, f"通信エラーばい: {e}")
+
+async def handle_proposal_reject(reply_token: str, prop_id: str):
+    """提案を却下"""
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.patch(f"http://memory-service:8003/proposals/{prop_id}", json={"status": "REJECTED"})
+            if r.status_code == 200:
+                await send_reply(reply_token, f"了解したばい。改修案 {prop_id} は破棄（アーカイブ）したよ。")
+            else:
+                await send_reply(reply_token, "却下処理に失敗したばい。")
+        except Exception as e:
+            await send_reply(reply_token, f"通信エラーばい: {e}")
+
 # --- Main Message Endpoint ---
 
 @app.post("/api/v1/message")
@@ -449,6 +550,23 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         await handle_activity_report(db, payload.reply_token)
         return
 
+    # 改修案・承認系
+    if text == "改修案一覧" or text == "改修案":
+        await handle_proposals_list(payload.reply_token)
+        return
+    elif text.startswith("承認 "):
+        prop_id = text.split()[1]
+        await handle_proposal_approve(payload.reply_token, prop_id)
+        return
+    elif text.startswith("却下 "):
+        prop_id = text.split()[1]
+        await handle_proposal_reject(payload.reply_token, prop_id)
+        return
+    elif text.startswith("詳細 "):
+        prop_id = text.split()[1]
+        await handle_proposal_detail(payload.reply_token, prop_id)
+        return
+
     # ---- AI 通常会話（OpenAI 連携） ----
     ai_status = get_system_state(db, "ai_status", "RUNNING")
     if ai_status == "STOPPED":
@@ -459,7 +577,10 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
     # OpenAI を呼び出して自律的な応答を生成
     async def process_ai_reply():
         try:
-            # 1. 課金チェック（簡易版）
+            # 1. 記憶コンテキストの取得
+            brain_context = await get_brain_context()
+
+            # 2. 課金チェック（簡易版）
             async with httpx.AsyncClient() as client:
                 billing_resp = await client.post("http://billing-guard:8002/check_high_cost_operation", 
                                                  json={"estimated_cost_jpy": 2.0}) # 1回約2円と見積もり
@@ -467,11 +588,11 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
                     await send_reply(payload.reply_token, "課金上限に達したみたいで、これ以上おしゃべりできんと。ごめんね。")
                     return
 
-            # 2. OpenAI API 呼び出し
+            # 3. OpenAI API 呼び出し
             response = await openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": SYSTEM_PROMPT + f"\n\n【脳内コンテキスト（現在の状況と記憶）】\n{brain_context}"},
                     {"role": "user", "content": payload.text}
                 ],
                 max_tokens=400,
@@ -479,12 +600,12 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
             )
             reply_text = response.choices[0].message.content.strip()
 
-            # 3. 返信
+            # 4. 返信
             await send_reply(payload.reply_token, reply_text)
 
-            # 4. メモリへの保存 (バックグラウンド)
-            # 本来は memory-service に投げるが、今回はログとして記録
-            logger.info(f"AI Response: {reply_text[:50]}...")
+            # 5. メモリへの保存 (WORKING)
+            await record_working_memory(f"Conversation with {AI_USER_NAME}", f"Master: {payload.text}\nAYN: {reply_text}")
+            logger.info(f"AI Response with context: {reply_text[:50]}...")
 
         except Exception as e:
             logger.error(f"OpenAI error: {e}")

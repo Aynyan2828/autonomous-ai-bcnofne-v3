@@ -140,6 +140,20 @@ services:
       - /sys:/sys:ro
       - ./oled_128x64_resize_dither.png:/app/oled_128x64_resize_dither.png:ro
 
+  dev-agent:
+    <<: *common
+    build:
+      context: .
+      dockerfile: dev-agent/Dockerfile
+    container_name: shipos-dev-agent
+    ports:
+      - "8012:8012"
+    volumes:
+      - .:/app/src
+      - ./workspace:/app/workspace
+    depends_on:
+      - memory-service
+
 networks:
   shipos-net:
     driver: bridge
