@@ -38,7 +38,7 @@ fi
 
 # 2. Restart Containers
 echo "====================================="
-echo " Starting shipOS Docker containers... "
+echo " Starting BCNOFNe Docker containers..."
 echo "====================================="
 docker compose down
 docker compose pull

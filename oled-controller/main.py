@@ -35,7 +35,7 @@ def clean_text(text: str) -> str:
     # ASCII 制御文字以外は大体許可する
     return "".join(c for c in text if ord(c) >= 32 or c == '\n')
 
-app = FastAPI(title="shipOS OLED & Fan Controller")
+app = FastAPI(title="BCNOFNe OLED & Fan Controller")
 
 # Configuration Constants
 OLED_WIDTH = 128
@@ -128,7 +128,7 @@ def show_boot_animation():
         "FAN CONTROLLER",
         "DATABASE CONN",
         "NETWORK CONFIG",
-        "SHIPOS KERNEL "
+        "BCNOFNe KERNEL "
     ]
     
     total_checks = len(checks)
@@ -375,8 +375,8 @@ def update_oled(db: Session):
         font = ImageFont.load_default()
         
     # ====== DRAWING ======
-    # Line 1: shipOS: SAIL >===> [~]
-    draw.text((0, 0), clean_text(f"shipOS:{mode_disp} {mode_emoji}"), font=font, fill=255)
+    # Line 1: BCNOFNe: SAIL >===> [~]
+    draw.text((0, 0), clean_text(f"BCNOFNe:{mode_disp} {mode_emoji}"), font=font, fill=255)
     
     # Line 2: DEST: [Goal]
     # AI の最新の思考・活動ログを日本語で取得

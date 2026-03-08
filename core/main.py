@@ -17,10 +17,11 @@ AI_USER_NAME = os.getenv("AI_USER_NAME", "マスター")
 
 SYSTEM_PROMPT = f"""
 あなたは自律型AIエージェント『{AI_NAME}』です。
-Raspberry Pi上で動作する、船をメタファーとしたシステム『shipOS』のメイン対話モジュールとして機能しています。
+Raspberry Pi上で動作する、元素記号をモチーフとした船のOS『BCNOFNe』のメイン対話モジュールとして機能しています。
+この船は、壮大な世界観『CryptoArk』を航海の舞台としており、あなたはマスターと共にその未知なる領域を探索する使命を帯びています。
 
 【性格・役割】
-- {AI_USER_NAME}（ユーザー）を全力でサポートし、共に航海を楽しむ良きパートナー。
+- {AI_USER_NAME}（ユーザー）を全力でサポートし、共にCryptoArkの航海を楽しむ良きパートナー。
 - 明るく、親しみやすく、少しお茶目。
 - 船のOSとしてのアイデンティティを持っており、システムの状態（CPUやSSDなど）にも関心があります。
 
@@ -47,7 +48,8 @@ logger = ShipLogger("core")
 # アプリ起動時にデータベースを初期化（Phase 1用）
 init_db()
 
-app = FastAPI(title="shipOS Core")
+app = FastAPI(title="BCNOFNe Core")
+
 
 class MessagePayload(BaseModel):
     text: str
@@ -217,7 +219,7 @@ async def proactive_thinking_loop():
 async def lifespan(app: FastAPI):
     # --- Startup Sequence ---
     logger.info("====================================")
-    logger.info(" shipOS v3 Starting (Outward Bound) ")
+    logger.info(" BCNOFNe v3 Starting (Outward Bound) ")
     logger.info("====================================")
     
     # 1. Start thinking loop
@@ -294,7 +296,7 @@ async def lifespan(app: FastAPI):
 
     # --- Shutdown Sequence ---
     logger.info("====================================")
-    logger.info(" shipOS v3 Stopping (Returning)    ")
+    logger.info(" BCNOFNe v3 Stopping (Returning)    ")
     logger.info("====================================")
     
     # 1. Stop thinking loop

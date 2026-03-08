@@ -9,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.database import SessionLocal
 from shared.models import SystemState
 
-app = FastAPI(title="shipOS Voice Router")
+app = FastAPI(title="BCNOFNe Voice Router")
 
 class SpeakRequest(BaseModel):
     text: str

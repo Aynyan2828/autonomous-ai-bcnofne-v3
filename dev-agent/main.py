@@ -22,7 +22,7 @@ VERSION = "v3.1.4-debug"
 print(f"AYN {VERSION} STARTING... (CWD: {os.getcwd()})")
 
 logger = ShipLogger("dev-agent")
-app = FastAPI(title="shipOS Dev Agent")
+app = FastAPI(title="BCNOFNe Dev Agent")
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 SRC_DIR = "/app/src"

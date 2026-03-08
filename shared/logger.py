@@ -55,7 +55,7 @@ class ShipLogger:
             try:
                 payload = {
                     "message": f"[{self.service_name}] **{level}**: {message}",
-                    "username": f"shipOS {self.service_name.upper()}"
+                    "username": f"BCNOFNe {self.service_name.upper()}"
                 }
                 await client.post(self.discord_url, json=payload, timeout=2.0)
             except Exception as e:
