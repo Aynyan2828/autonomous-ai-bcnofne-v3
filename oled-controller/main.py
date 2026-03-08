@@ -195,12 +195,16 @@ def update_oled(db: Session):
     ip = os.environ.get("HOST_IP", "??") 
     ts_ip = os.environ.get("TAILSCALE_IP", "??")
     
+    ip_scroll = f"LAN:{ip} TS:{ts_ip}"
+    
     # Scroll message setup (Clean ASCII only)
     new_scroll = clean_text(get_system_state_val(db, "oled_scroll_msg", "System Online"))
+    total_scroll = f"{new_scroll} | {ip_scroll}"
     
-    if new_scroll != scroll_message:
-        scroll_message = new_scroll
+    if total_scroll != scroll_message:
+        scroll_message = total_scroll
         scroll_pos = OLED_WIDTH
+
     
     # Special faces mapping based on score
     if score < 40:
@@ -234,14 +238,15 @@ def update_oled(db: Session):
     # Line 3: AI: (face)
     draw.text((0, 22), f"AI: {ai_face}", font=font, fill=255)
     
-    # Line 4: LAN: [IP] TS: [IP]
-    draw.text((0, 33), f"LAN:{ip} TS:{ts_ip}", font=font, fill=255)
+    # Line 4: Hardwares (TEMP/DISK)
+    draw.text((0, 33), f"TEMP:{temp:.0f}C DISK:{disk_pct:.0f}%", font=font, fill=255)
     
-    # Line 5: TEMP: [temp]C DISK: [disk]%
-    draw.text((0, 44), f"TEMP:{temp:.0f}C DISK:{disk_pct:.0f}%", font=font, fill=255)
+    # Line 5: Blank or status (To keep spec alignment if needed, but moving IPs to scroll)
+    draw.text((0, 44), "STATUS: ONLINE", font=font, fill=255)
     
-    # Line 6: Scrolling message
+    # Line 6: Scrolling message (Includes IPs)
     draw.text((scroll_pos, 55), scroll_message, font=font, fill=255)
+
     
     # スクロール位置更新
     scroll_pos -= 2

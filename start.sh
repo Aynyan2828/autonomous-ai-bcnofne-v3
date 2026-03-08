@@ -11,36 +11,29 @@ echo "====================================="
 echo " Exploring Network for IPs...        "
 echo "====================================="
 
-# Get real LAN IP (primary interface used for internet)
-LOCAL_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
+# Get Tailscale IP separately
+TS_IP=$(tailscale ip -4 2>/dev/null | head -n 1)
+if [ -z "$TS_IP" ]; then
+    TS_IP="NOT_FOUND"
+fi
+echo "FOUND TAILSCALE IP: ${TS_IP}"
+
+# Get LAN IP (exclude 100.x Tailscale, 172.x Docker, 127.x loopback)
+LOCAL_IP=$(hostname -I | tr ' ' '\n' | grep -v '^100\.' | grep -v '^172\.' | grep -v '^127\.' | head -n 1)
 if [ -z "$LOCAL_IP" ]; then
-    # Fallback to general hostname -I if no route (offline/local only)
-    LOCAL_IP=$(hostname -I | awk '{print $1}')
+    LOCAL_IP="NOT_FOUND"
 fi
 echo "FOUND LOCAL IP: ${LOCAL_IP}"
-
-# Get Tailscale IP
-TS_IP=""
-if command -v tailscale &> /dev/null; then
-    TS_IP=$(tailscale ip -4 2>/dev/null | head -n 1)
-    if [ -n "$TS_IP" ]; then
-        echo "FOUND TAILSCALE IP: ${TS_IP}"
-    else
-        echo "TAILSCALE IP NOT FOUND"
-    fi
-else
-    echo "TAILSCALE NOT INSTALLED"
-fi
 
 # Update .env file with current IPs
 if [ -f .env ]; then
     sed -i '/^HOST_IP=/d' .env
     sed -i '/^TAILSCALE_IP=/d' .env
-    echo "HOST_IP=${LOCAL_IP:-NOT_FOUND}" >> .env
-    echo "TAILSCALE_IP=${TS_IP:-NOT_FOUND}" >> .env
+    echo "HOST_IP=${LOCAL_IP}" >> .env
+    echo "TAILSCALE_IP=${TS_IP}" >> .env
 else
-    echo "HOST_IP=${LOCAL_IP:-NOT_FOUND}" > .env
-    echo "TAILSCALE_IP=${TS_IP:-NOT_FOUND}" >> .env
+    echo "HOST_IP=${LOCAL_IP}" > .env
+    echo "TAILSCALE_IP=${TS_IP}" >> .env
 fi
 
 # 2. Restart Containers
