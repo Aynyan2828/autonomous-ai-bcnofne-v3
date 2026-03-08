@@ -608,6 +608,9 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         await send_reply(payload.reply_token, f"(AIは停止中です。理由: {stop_reason})")
         return
 
+    # OLED の DEST を更新
+    set_system_state(db, "ai_target_goal", f"対話中:{payload.text[:10]}")
+
     # OpenAI を呼び出して自律的な応答を生成
     async def process_ai_reply():
         try:
@@ -640,6 +643,9 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
             # 5. メモリへの保存 (WORKING)
             await record_working_memory(f"Conversation with {AI_USER_NAME}", f"Master: {payload.text}\nAYN: {reply_text}")
             logger.info(f"AI Response with context: {reply_text[:50]}...")
+            
+            # OLED の DEST をリセット（または次を待機）
+            set_system_state(db, "ai_target_goal", "待機中ばい")
 
         except Exception as e:
             logger.error(f"OpenAI error: {e}")
