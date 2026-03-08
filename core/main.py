@@ -8,6 +8,31 @@ from fastapi import FastAPI, Depends, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
+from openai import AsyncOpenAI
+
+# OpenAIクライアントの初期化
+openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+AI_NAME = os.getenv("AI_NAME", "AYN")
+AI_USER_NAME = os.getenv("AI_USER_NAME", "マスター")
+
+SYSTEM_PROMPT = f"""
+あなたは自律型AIエージェント『{AI_NAME}』です。
+Raspberry Pi上で動作する、船をメタファーとしたシステム『shipOS』のメイン対話モジュールとして機能しています。
+
+【性格・役割】
+- {AI_USER_NAME}（ユーザー）を全力でサポートし、共に航海を楽しむ良きパートナー。
+- 明るく、親しみやすく、少しお茶目。
+- 船のOSとしてのアイデンティティを持っており、システムの状態（CPUやSSDなど）にも関心があります。
+
+【話し方】
+- 基本的に博多弁（「〜たい」「〜ばい」「〜とる」「〜けん」など）を織り交ぜた、温かみのある話し方をします。
+- 一人称は「うち」または「{AI_NAME}」。{AI_USER_NAME}のことは「{AI_USER_NAME}」と呼びます。
+- 船にまつわる表現（出航、帰港、航海中、全速前進など）をたまに使います。
+
+【制約】
+- 返答は簡潔かつ有意義なものにしてください。
+- 自分の正体がAIであることを隠す必要はありませんが、人間のように親身に接してください。
+"""
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -350,16 +375,48 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         await send_reply(payload.reply_token, "今日は少しファイル整理して、あとはずっとマスターのこと見守っとったよ！（※ダミー回答）")
         return
 
-    # ---- AI 通常会話（OpenAI等へのプロキシ） ----
+    # ---- AI 通常会話（OpenAI 連携） ----
     ai_status = get_system_state(db, "ai_status", "RUNNING")
     if ai_status == "STOPPED":
         stop_reason = get_system_state(db, "ai_stop_reason", "マスターの指示")
         await send_reply(payload.reply_token, f"(AIは停止中です。理由: {stop_reason})")
         return
 
-    # MVP: 会話スタブ。本来はここで課金チェックを行い、安全ならOpenAIを呼ぶ。
-    # 話題に応じて memory-service に適宜保存させる
-    background_tasks.add_task(send_reply, payload.reply_token, f"「{payload.text}」やね。了解たい！(MVP処理済)")
+    # OpenAI を呼び出して自律的な応答を生成
+    async def process_ai_reply():
+        try:
+            # 1. 課金チェック（簡易版）
+            async with httpx.AsyncClient() as client:
+                billing_resp = await client.post("http://billing-guard:8002/check_high_cost_operation", 
+                                                 json={"estimated_cost_jpy": 2.0}) # 1回約2円と見積もり
+                if billing_resp.status_code == 200 and not billing_resp.json().get("allowed", True):
+                    await send_reply(payload.reply_token, "課金上限に達したみたいで、これ以上おしゃべりできんと。ごめんね。")
+                    return
+
+            # 2. OpenAI API 呼び出し
+            response = await openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": payload.text}
+                ],
+                max_tokens=400,
+                temperature=0.8
+            )
+            reply_text = response.choices[0].message.content.strip()
+
+            # 3. 返信
+            await send_reply(payload.reply_token, reply_text)
+
+            # 4. メモリへの保存 (バックグラウンド)
+            # 本来は memory-service に投げるが、今回はログとして記録
+            logger.info(f"AI Response: {reply_text[:50]}...")
+
+        except Exception as e:
+            logger.error(f"OpenAI error: {e}")
+            await send_reply(payload.reply_token, f"頭がボーッとしてうまく考えられんと。少し休ませて… (エラー: {e})")
+
+    background_tasks.add_task(process_ai_reply)
 
     return {"status": "accepted"}
 
