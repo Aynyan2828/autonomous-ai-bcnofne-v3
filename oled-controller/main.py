@@ -42,11 +42,16 @@ TEMP_THRESHOLD_LOW = 45.0  # Fan OFF
 
 # shipOS Mode Mapping (Naval Terms)
 SHIP_MODE_DISPLAY = {
-    "autonomous":  "SAIL",
-    "user_first":  "PORT",
-    "maintenance": "DOCK",
-    "power_save":  "ANCHOR",
-    "safe":        "SOS",
+    "autonomous":  "SAIL  >===>",
+    "user_first":  "PORT  >===>",
+    "maintenance": "DOCK  >===>",
+    "power_save":  "ANCHOR>===>",
+    "safe":        "SOS   >===>",
+    "SAIL":        "SAIL  >===>",
+    "PORT":        "PORT  >===>",
+    "DOCK":        "DOCK  >===>",
+    "ANCHOR":      "ANCHOR>===>",
+    "SOS":         "SOS   >===>",
 }
 
 SHIP_MODE_EMOJI = {
@@ -55,18 +60,23 @@ SHIP_MODE_EMOJI = {
     "maintenance": "[M]",
     "power_save":  "[z]",
     "safe":        "[!]",
+    "SAIL":        "[~]",
+    "PORT":        "[P]",
+    "DOCK":        "[M]",
+    "ANCHOR":      "[z]",
+    "SOS":         "[!]",
 }
 
-# AI State -> Naval Terms
-AI_STATE_DISPLAY = {
-    "Idle":          "WATCH",
-    "Planning":      "HELM",
-    "Acting":        "ENGINE",
-    "Moving Files":  "CARGO",
-    "Error":         "ALARM",
-    "Wait":          "SIGNAL",
-    "RUNNING":       "HELM",
-    "STOPPED":       "ALARM",
+# AI State -> Faces
+AI_STATE_FACE = {
+    "Idle":          "(-_-)",
+    "Planning":      "( ..)phi",
+    "Acting":        "(o_o)",
+    "Moving Files":  "( ..)phi",
+    "Error":         "(x_x)",
+    "Wait":          "(o_o)",
+    "RUNNING":       "(o_o)",
+    "STOPPED":       "(x_x)",
 }
 
 # Runtime Variables
@@ -168,28 +178,40 @@ def update_oled(db: Session):
     temp = get_cpu_temp()
     
     # Mood calculation
-    score, mood_face = compute_mood(temp, ai_status, ship_mode)
+    score, _ = compute_mood(temp, ai_status, ship_mode)
     
     # Mapping
-    mode_disp = SHIP_MODE_DISPLAY.get(ship_mode, "SAIL")
+    mode_disp = SHIP_MODE_DISPLAY.get(ship_mode, "SAIL  >===>")
     mode_emoji = SHIP_MODE_EMOJI.get(ship_mode, "[~]")
-    ai_disp = AI_STATE_DISPLAY.get(ai_status, ai_status[:6])
+    ai_face = AI_STATE_FACE.get(ai_status, "(-_-)")
+    
+    # Disk usage
+    try:
+        disk_pct = psutil.disk_usage('/').percent
+    except:
+        disk_pct = 0.0
     
     # Network info from environment
     ip = os.environ.get("HOST_IP", "??") 
     ts_ip = os.environ.get("TAILSCALE_IP", "??")
     
-    ip_text = f"IP:{ip}" if ip != "??" else ""
-    if ts_ip != "??":
-        ip_text += f" TS:{ts_ip}"
-    
     # Scroll message setup (Clean ASCII only)
     new_scroll = clean_text(get_system_state_val(db, "oled_scroll_msg", "System Online"))
-    total_scroll = f"{new_scroll} | {ip_text}" if ip_text else new_scroll
     
-    if total_scroll != scroll_message:
-        scroll_message = total_scroll
+    if new_scroll != scroll_message:
+        scroll_message = new_scroll
         scroll_pos = OLED_WIDTH
+    
+    # Special faces mapping based on score
+    if score < 40:
+        ai_face = "(x_x)" 
+    elif ai_status == "Planning":
+        ai_face = "( ..)phi"
+    elif ai_status == "RUNNING" or ai_status == "Acting":
+        ai_face = "(o_o)"
+    else:
+        ai_face = "(-_-)"
+
 
     image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
     draw = ImageDraw.Draw(image)
@@ -202,22 +224,24 @@ def update_oled(db: Session):
         font = None # Use basic text
         
     # ====== DRAWING ======
-    # Line 1: Title and Mode
+    # Line 1: shipOS: SAIL >===> [~]
     draw.text((0, 0), clean_text(f"shipOS:{mode_disp} {mode_emoji}"), font=font, fill=255)
     
-    # Line 2: DEST
+    # Line 2: DEST: [Goal]
     goal = clean_text(get_system_state_val(db, "ai_target_goal", "---"))[:13]
-    draw.text((0, 12), f"DEST:{goal}", font=font, fill=255)
+    draw.text((0, 11), f"DEST:{goal}", font=font, fill=255)
     
-    # Line 3: HELM
-    draw.text((0, 24), clean_text(f"HELM:{ai_disp} {mood_face}{score:02d}"), font=font, fill=255)
+    # Line 3: AI: (face)
+    draw.text((0, 22), f"AI: {ai_face}", font=font, fill=255)
     
-    # Line 4: Hardwares
-    fan_mark = "*" if fan_is_on else " "
-    draw.text((0, 36), f"T:{temp:.1f}C FAN[{fan_mark}]", font=font, fill=255)
+    # Line 4: LAN: [IP] TS: [IP]
+    draw.text((0, 33), f"LAN:{ip} TS:{ts_ip}", font=font, fill=255)
     
-    # Line 5: Scrolling message
-    draw.text((scroll_pos, 48), scroll_message, font=font, fill=255)
+    # Line 5: TEMP: [temp]C DISK: [disk]%
+    draw.text((0, 44), f"TEMP:{temp:.0f}C DISK:{disk_pct:.0f}%", font=font, fill=255)
+    
+    # Line 6: Scrolling message
+    draw.text((scroll_pos, 55), scroll_message, font=font, fill=255)
     
     # スクロール位置更新
     scroll_pos -= 2

@@ -10,9 +10,12 @@
 echo "====================================="
 echo " Exploring Network for IPs...        "
 echo "====================================="
-LOCAL_IP=$(hostname -I | awk '{print $1}')
+
+# Get real LAN IP (exclude loopback and Tailscale 100.x)
+LOCAL_IP=$(hostname -I | tr ' ' '\n' | grep -v '^100\.' | grep -v '^127\.' | head -n 1)
 echo "FOUND LOCAL IP: ${LOCAL_IP}"
 
+# Get Tailscale IP
 TS_IP=""
 if command -v tailscale &> /dev/null; then
     TS_IP=$(tailscale ip -4 2>/dev/null | head -n 1)
@@ -26,15 +29,14 @@ else
 fi
 
 # Update .env file with current IPs
-# This ensures docker-compose can pass them to containers
 if [ -f .env ]; then
     sed -i '/^HOST_IP=/d' .env
     sed -i '/^TAILSCALE_IP=/d' .env
-    echo "HOST_IP=${LOCAL_IP}" >> .env
-    echo "TAILSCALE_IP=${TS_IP}" >> .env
+    echo "HOST_IP=${LOCAL_IP:-NOT_FOUND}" >> .env
+    echo "TAILSCALE_IP=${TS_IP:-NOT_FOUND}" >> .env
 else
-    echo "HOST_IP=${LOCAL_IP}" > .env
-    echo "TAILSCALE_IP=${TS_IP}" >> .env
+    echo "HOST_IP=${LOCAL_IP:-NOT_FOUND}" > .env
+    echo "TAILSCALE_IP=${TS_IP:-NOT_FOUND}" >> .env
 fi
 
 # 2. Restart Containers
