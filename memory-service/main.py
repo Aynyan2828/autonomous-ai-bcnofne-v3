@@ -128,20 +128,26 @@ def get_longterm_memories(topic: str = None, layer: str = None, limit: int = 20,
 @app.get("/summary")
 def get_memory_summary(db: Session = Depends(get_db)):
     """現在保持している重要な記憶を要約する。MISSION や REFLECTIVE を優先的に含める。"""
-    logger.info("Memory summary requested via /summary")
-    # 特定の層を優先して取得
-    priority_layers = [MemoryLayer.MISSION.value, MemoryLayer.REFLECTIVE.value, MemoryLayer.SEMANTIC.value]
-    memories = db.query(Memory).filter(Memory.layer.in_(priority_layers)).order_by(Memory.importance.desc(), Memory.created_at.desc()).limit(5).all()
-    
-    # 通常の記憶も追加
-    recent_memories = db.query(Memory).filter(Memory.layer == MemoryLayer.EPISODIC.value).order_by(Memory.created_at.desc()).limit(5).all()
-    memories.extend(recent_memories)
+    try:
+        logger.info("Memory summary requested via /summary")
+        # 特定の層を優先して取得
+        priority_layers = [MemoryLayer.MISSION.value, MemoryLayer.REFLECTIVE.value, MemoryLayer.SEMANTIC.value]
+        memories = db.query(Memory).filter(Memory.layer.in_(priority_layers)).order_by(Memory.importance.desc(), Memory.created_at.desc()).limit(5).all()
+        
+        # 通常の記憶も追加
+        recent_memories = db.query(Memory).filter(Memory.layer == MemoryLayer.EPISODIC.value).order_by(Memory.created_at.desc()).limit(5).all()
+        memories.extend(recent_memories)
 
-    if not memories:
-        return {"summary": "特に記憶していることはなかよ。"}
-    
-    summary_text = "現在の脳内コンテキストばい:\n" + "\n".join([f"- [{m.layer}/{m.topic}] {m.content}" for m in memories])
-    return {"summary": summary_text}
+        if not memories:
+            return {"summary": "特に記憶していることはなかよ。"}
+        
+        summary_text = "現在の脳内コンテキストばい:\n" + "\n".join([f"- [{m.layer}/{m.topic}] {m.content}" for m in memories])
+        return {"summary": summary_text}
+    except Exception as e:
+        import traceback
+        error_msg = f"Summary error: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
 # --- Proposal Endpoints ---
 
