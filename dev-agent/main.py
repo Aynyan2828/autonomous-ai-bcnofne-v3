@@ -56,13 +56,15 @@ async def execute_apply(proposal_id: str):
             proposal = r.json()
 
         # 2. バックアップ (Git commit)
-        # 本来はホスト側で行うのが安全だが、コンテナ内からも git 操作ができる前提
         try:
+            # Dockerコンテナ内での所有権エラー回避
+            subprocess.run(["git", "config", "--global", "--add", "safe.directory", SRC_DIR], check=True)
+            
             subprocess.run(["git", "-C", SRC_DIR, "add", "."], check=True)
             subprocess.run(["git", "-C", SRC_DIR, "commit", "-m", f"pre-apply backup for {proposal_id}"], check=True)
-            logger.info("Backup commit created.")
+            logger.info("Backup commit created successfully.")
         except Exception as e:
-            logger.warn(f"Backup commit failed (maybe no changes?): {e}")
+            logger.warn(f"Backup commit skipped or failed: {e}")
 
         # 3. 反映実行 (workspace から src へコピー)
         # 固定の workspace 構造を想定
@@ -74,9 +76,12 @@ async def execute_apply(proposal_id: str):
             src_full = os.path.join(SRC_DIR, f_path)
             work_full = os.path.join(WORKSPACE_DIR, f_path)
             if os.path.exists(work_full):
+                logger.info(f"Source file found in workspace: {work_full}")
                 os.makedirs(os.path.dirname(src_full), exist_ok=True)
                 shutil.copy2(work_full, src_full)
-                logger.info(f"Applied change to {f_path}")
+                logger.info(f"Successfully applied change to {f_path}")
+            else:
+                logger.error(f"Source file NOT FOUND in workspace: {work_full} (Proposal: {proposal_id})")
 
         # 4. ステータス更新
         async with httpx.AsyncClient() as client:

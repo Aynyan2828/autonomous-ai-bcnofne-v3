@@ -462,6 +462,8 @@ async def handle_proposal_detail(reply_token: str, prop_id: str):
                     text += f"対象: {p.get('files_affected')}\n"
                 if p.get('test_results'):
                     text += f"\n【テスト結果】\n{p.get('test_results')}\n"
+                if p.get('diff_content'):
+                    text += f"\n【変更内容（抜粋）】\n{p.get('diff_content')[:500]}..."
                 await send_reply(reply_token, text)
             else:
                 await send_reply(reply_token, f"提案 {prop_id} が見つからんやった。")
