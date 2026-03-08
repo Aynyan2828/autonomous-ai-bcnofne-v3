@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.database import SessionLocal, init_db
+from shared import init_db
+from shared.database import SessionLocal
 from shared.models import SystemState, ShipMode
 
 # アプリ起動時にデータベースを初期化（Phase 1用）
