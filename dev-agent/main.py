@@ -122,13 +122,17 @@ async def development_loop():
 
 async def safe_get_memory_summary(client):
     """memory-service からの要約取得をリトライ付きで実行"""
-    for i in range(10):  # 起動待ちを考慮して回数を増やす
+    urls = [MEMORY_SERVICE_URL, "http://shipos-memory-service:8003"]
+    for i in range(10):
+        url = urls[0] if i % 2 == 0 else urls[1]
         try:
-            r = await client.get(f"{MEMORY_SERVICE_URL}/summary", timeout=10.0)
+            r = await client.get(f"{url}/summary", timeout=10.0)
             if r.status_code == 200:
                 return r.json().get("summary", "")
+            else:
+                logger.warn(f"Failed to fetch memory summary (attempt {i+1}): HTTP {r.status_code}")
         except Exception as e:
-            logger.warn(f"Failed to fetch memory summary (attempt {i+1}): {e}")
+            logger.warn(f"Failed to fetch memory summary (attempt {i+1}): {repr(e)}")
             await asyncio.sleep(5)
     return "N/A"
 
