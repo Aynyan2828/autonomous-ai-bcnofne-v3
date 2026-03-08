@@ -125,6 +125,14 @@ async def billing_monitor_task():
     while True:
         try:
             db = SessionLocal()
+            # Wait for table creation
+            try:
+                db.execute("SELECT 1 FROM system_state LIMIT 1")
+            except Exception:
+                db.close()
+                await asyncio.sleep(5)
+                continue
+                
             enforce_limits(db)
             db.close()
         except Exception as e:
