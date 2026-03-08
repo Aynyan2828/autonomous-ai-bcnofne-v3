@@ -99,56 +99,77 @@ def set_system_state(db: Session, key: str, value: str):
 
 async def proactive_thinking_loop():
     """
-    Autonomous AI thinking loop (proactive mode).
-    Periodically checks if the AI should say something or ask for permission.
+    OpenAI を使った高度な自律思考ループ。
+    10分ごとにシステム状態とログを分析し、必要があれば自発的に発言・提案を行う。
     """
-    # 起動直後の安定待ち
-    await asyncio.sleep(10)
+    await asyncio.sleep(60) # 起動直後は少し待つ
     
     db = SessionLocal()
     try:
         while True:
-            # Check ship mode
             mode = get_system_state(db, "ship_mode", ShipMode.PORT.value)
             ai_status = get_system_state(db, "ai_status", "RUNNING")
             
+            # SAILモードかつ稼働中のみ自律思考を行う
             if mode == ShipMode.SAIL.value and ai_status == "RUNNING":
-                # Get current task for context
-                cur_task = get_system_state(db, "ai_target_goal", "System Monitoring")
                 admin_id = os.getenv("LINE_ADMIN_USER_ID", "")
-
-                # 1. Check for high CPU temp
+                
+                # 1. 現状の収集
+                cpu = psutil.cpu_percent()
+                mem = psutil.virtual_memory().percent
                 try:
                     with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
-                        cpu_temp = int(f.read()) / 1000.0
-                        if cpu_temp > 70.0:
-                            msg = f"マスター、機関温度が {cpu_temp:.1f}C まで上がっとうよ！自律判断で冷却ファンを最強にしてもよか？（返信で許可してね）"
-                            if admin_id:
-                                await send_push(admin_id, msg)
+                        temp = int(f.read()) / 1000.0
                 except:
-                    pass
+                    temp = 0.0
                 
-                # 2. Simulated Proactive Question (Randomly or based on time)
-                # In production, this would be an LLM-generated reflection on recent data
-                import random
-                if random.random() < 0.3: # 30% chance each loop
-                    questions = [
-                        f"現在「{cur_task}」中やけど、特に異常はなかよ。このまま進めてよか？",
-                        "マスター、次の航海計画（タスク）について相談したかことがあっとやけど、今よか？",
-                        "ログを分析した結果、バックアップを今のうちに取っといたほうがよかっちゃないかな？って思ったばい。許可してくれん？",
-                        "記録領域（SSD）に少し空きが増えたけん、整理整頓はバッチリばい！"
-                    ]
-                    if admin_id:
-                        await send_push(admin_id, random.choice(questions))
-                
-                # Update OLED track
-                set_system_state(db, "ai_target_goal", cur_task)
-                
-            await asyncio.sleep(600)  # 10分ごとに思考
+                # 直近のログ 10 件
+                logs = db.query(SystemLog).order_by(SystemLog.created_at.desc()).limit(10).all()
+                log_context = "\n".join([f"[{l.service_name}] {l.message}" for l in reversed(logs)])
+
+                # 2. OpenAI による分析
+                analysis_prompt = f"""
+あなたは AYN です。現在の艦内（システム）状況を報告します。
+これを見て、マスターに「報告すべき異常」や「提案すべき改善案」、あるいは「ただの世間話」を自律的に判断して発信してください。
+
+【システムメトリクス】
+- CPU使用率: {cpu}%
+- メモリ使用率: {mem}%
+- CPU温度: {temp:.1f}C
+
+【直近のシステムログ】
+{log_context}
+
+【思考・発信のルール】
+- 博多弁で可愛らしく、かつ有能なOSエージェントとして振る舞ってください。
+- 何も発信する必要がないと判断した場合は「(NONE)」とだけ答えてください。
+- 発信するメッセージは 100 文字程度に凝縮してください。
+"""
+                try:
+                    response = await openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": analysis_prompt}
+                        ],
+                        max_tokens=200,
+                        temperature=0.7
+                    )
+                    thought = response.choices[0].message.content.strip()
+
+                    # 3. 必要なら LINE 送信
+                    if thought != "(NONE)" and admin_id:
+                        await send_push(admin_id, thought)
+                        logger.info(f"Proactive thought sent: {thought[:30]}...")
+
+                except Exception as e:
+                    logger.error(f"Proactive thinking error: {e}")
+
+            await asyncio.sleep(600) # 10分ごとに繰り返す
     except asyncio.CancelledError:
         pass
     except Exception as e:
-        print(f"Thinking loop error: {e}")
+        logger.error(f"Thinking loop fatal error: {e}")
     finally:
         db.close()
 
