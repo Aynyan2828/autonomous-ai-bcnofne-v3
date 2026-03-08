@@ -19,4 +19,4 @@ COPY dev-agent/ ./dev-agent/
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-CMD ["uvicorn", "dev-agent.main:app", "--host", "0.0.0.0", "--port", "8012"]
+CMD ["uvicorn", "dev-agent.main:app", "--host", "0.0.0.0", "--port", "8013"]
