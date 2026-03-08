@@ -50,6 +50,41 @@ class ApplyRequest(BaseModel):
 def health_check():
     return {"status": "ok", "service": "dev-agent"}
 
+@app.post("/sync")
+async def sync_repository():
+    """
+    GitHub から最新のソースコードを取得するエンドポイント
+    """
+    try:
+        # 1. Git pull 実行
+        logger.info("Starting git pull from origin main...")
+        res = subprocess.run(
+            ["git", "-C", SRC_DIR, "pull", "origin", "main"],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if res.returncode == 0:
+            logger.info("Git pull completed successfully.")
+            return {
+                "status": "success",
+                "message": "魂（コード）の同期が完了したばい！最新の状態になったよ。",
+                "output": res.stdout
+            }
+        else:
+            logger.error(f"Git pull failed: {res.stderr}")
+            return {
+                "status": "error",
+                "message": f"同期に失敗したばい...。エラーが出とるよ：\n{res.stderr}",
+                "output": res.stderr
+            }
+            
+    except Exception as e:
+        logger.error(f"Sync fatal error: {e}")
+        return {
+            "status": "error",
+            "message": f"同期中に致命的な問題が発生したばい：{e}"
+        }
+
 @app.post("/apply/{proposal_id}")
 async def apply_proposal(proposal_id: str, background_tasks: BackgroundTasks):
     """

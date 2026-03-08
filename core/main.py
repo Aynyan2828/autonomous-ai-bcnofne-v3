@@ -500,6 +500,25 @@ async def handle_proposal_reject(reply_token: str, prop_id: str):
         except Exception as e:
             await send_reply(reply_token, f"通信エラーばい: {e}")
 
+async def handle_sync_command(reply_token: str):
+    """GitHub から最新コードを同期する"""
+    await send_reply(reply_token, "了解！最新の魂（コード）を GitHub から取り込んでくるばい。ちょっと待っとってね。")
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            # dev-agent の /sync エンドポイントを叩く
+            resp = await client.post("http://dev-agent:8013/sync", timeout=40.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                msg = data.get("message", "同期が完了したばい！")
+                msg += "\n\n反映させるために、必要があれば AYN を再起動（docker compose restart 等）してね！"
+                await send_reply(reply_token, msg)
+            else:
+                await send_reply(reply_token, f"ごめん、うまく同期できんかった...。 (HTTP {resp.status_code})")
+    except Exception as e:
+        logger.error(f"Sync command error: {e}")
+        await send_reply(reply_token, f"同期中にエラーが起きたばい。後でもう一回試してみて：{e}")
+
 # --- Main Message Endpoint ---
 
 @app.post("/api/v1/message")
@@ -554,6 +573,9 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         return
     elif "今日何した" in text:
         await handle_activity_report(db, payload.reply_token)
+        return
+    elif text == "同期" or text == "アップデート":
+        await handle_sync_command(payload.reply_token)
         return
 
     # 改修案・承認系

@@ -6,6 +6,9 @@
 # - jq installed (sudo apt install jq)
 # - tailscale installed (optional)
 
+# 0. Set working directory to the script's location
+cd "$(dirname "$0")"
+
 # 1. IP Address Discovery
 echo "====================================="
 echo " Exploring Network for IPs...        "
