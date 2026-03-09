@@ -25,6 +25,19 @@ logger = ShipLogger("dev-agent")
 app = FastAPI(title="BCNOFNe Dev Agent")
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+async def _report_billing(response, model: str = "gpt-4o-mini"):
+    """OpenAI 呼び出し後に billing-guard に使用量を報告する"""
+    try:
+        usage = getattr(response, 'usage', None)
+        input_tokens = usage.prompt_tokens if usage else 500
+        output_tokens = usage.completion_tokens if usage else 500
+        async with httpx.AsyncClient() as client:
+            await client.post("http://billing-guard:8002/record",
+                            params={"model": model, "input_tokens": input_tokens, "output_tokens": output_tokens},
+                            timeout=2.0)
+    except Exception:
+        pass
+
 SRC_DIR = "/app/src"
 WORKSPACE_DIR = "/app/workspace"
 MEMORY_SERVICE_URL = "http://memory-service:8003"
@@ -336,6 +349,7 @@ async def run_autonomous_observation():
             response_format={ "type": "json_object" }
         )
         suggestion = json.loads(response.choices[0].message.content)
+        await _report_billing(response, "gpt-4o-mini")
         
         # ユニークID付与
         suggestion["id"] = f"PROP-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
@@ -416,6 +430,7 @@ async def process_suggestion(suggestion):
                 messages=[{"role": "user", "content": edit_prompt}]
             )
             new_code = res.choices[0].message.content.strip()
+            await _report_billing(res, "gpt-4o")
             if new_code.startswith("```"):
                 new_code = "\n".join(new_code.split("\n")[1:-1])
             

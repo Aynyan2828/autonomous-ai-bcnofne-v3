@@ -145,6 +145,10 @@ html_template = """
             <span class="status-val">{{ billing_data.current_cost_jpy }} 円</span>
         </div>
         <div class="status-row">
+            <span class="status-key">Requests</span>
+            <span class="status-val">{{ billing_data.request_count }} 回</span>
+        </div>
+        <div class="status-row">
             <span class="status-key">Alert</span>
             <span class="status-val {% if billing_data.alert_level == 'STOP' %}alert{% elif billing_data.alert_level in ['ALERT', 'WARNING'] %}warning{% endif %}">
                 {{ billing_data.alert_level }}
