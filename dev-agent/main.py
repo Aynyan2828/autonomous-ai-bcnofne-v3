@@ -9,7 +9,7 @@ import uuid
 import traceback
 import difflib
 from datetime import datetime, timezone, timedelta
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Header
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 
