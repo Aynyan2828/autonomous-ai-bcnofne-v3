@@ -57,7 +57,7 @@ logger = ShipLogger("core")
 # アプリ起動時にデータベースを初期化（Phase 1用）
 init_db()
 
-app = FastAPI(title="BCNOFNe Core")
+app = FastAPI(title="BCNOFNe Core", lifespan=lifespan)
 
 
 class MessagePayload(BaseModel):
@@ -130,18 +130,21 @@ async def record_working_memory(topic: str, content: str):
         except Exception as e:
             logger.error(f"Failed to record working memory: {e}")
 
-async def report_usage(response, model: str = "gpt-4o-mini"):
-    """OpenAI API 呼び出し後に billing-guard に使用量を報告する"""
-    try:
-        usage = getattr(response, 'usage', None)
-        input_tokens = usage.prompt_tokens if usage else 500
-        output_tokens = usage.completion_tokens if usage else 500
-        async with httpx.AsyncClient() as client:
-            await client.post("http://billing-guard:8002/record",
-                            params={"model": model, "input_tokens": input_tokens, "output_tokens": output_tokens},
-                            timeout=2.0)
-    except Exception:
-        pass  # billing-guard への報告失敗は無視
+async def register_version_memory_on_startup():
+    """起動時に自身のバージョン情報を記憶(SEMANTIC)に刻み込む"""
+    await asyncio.sleep(10) # memory-service の起動を待つ
+    logger.info(f"Registering system version {SYSTEM_VERSION} to memory-service...")
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post("http://memory-service:8003/memories/", json={
+                "topic": "System Version",
+                "content": f"現在のシステム構成は {SYSTEM_VERSION} ばい。整備士(dev-agent)も同じく {DEV_AGENT_VERSION}。1.0 はもう古いバージョンやけん、間違えんようにね！",
+                "layer": "SEMANTIC",
+                "importance": 5
+            }, timeout=5.0)
+            logger.info("Successfully registered version memory.")
+        except Exception as e:
+            logger.error(f"Failed to register version memory: {e}")
 
 # --- Autonomous Thinking Loop ---
 
@@ -246,6 +249,7 @@ async def lifespan(app: FastAPI):
     logger.info("====================================")
     
     thinking_task = asyncio.create_task(proactive_thinking_loop())
+    asyncio.create_task(register_version_memory_on_startup())
     
     # 2. IP Address Discovery
     # Docker Bridge モードではコンテナ内から LAN/TS IP は見えない
@@ -777,7 +781,6 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
             await send_reply(payload.reply_token, f"頭がボーッとしてうまく考えられんと。少し休ませて… (エラー: {e})")
 
     background_tasks.add_task(process_ai_reply)
-
     return {"status": "accepted"}
 
 @app.get("/health")
