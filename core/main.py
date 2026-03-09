@@ -122,6 +122,19 @@ async def record_working_memory(topic: str, content: str):
         except Exception as e:
             logger.error(f"Failed to record working memory: {e}")
 
+async def report_usage(response, model: str = "gpt-4o-mini"):
+    """OpenAI API 呼び出し後に billing-guard に使用量を報告する"""
+    try:
+        usage = getattr(response, 'usage', None)
+        input_tokens = usage.prompt_tokens if usage else 500
+        output_tokens = usage.completion_tokens if usage else 500
+        async with httpx.AsyncClient() as client:
+            await client.post("http://billing-guard:8002/record",
+                            params={"model": model, "input_tokens": input_tokens, "output_tokens": output_tokens},
+                            timeout=2.0)
+    except Exception:
+        pass  # billing-guard への報告失敗は無視
+
 # --- Autonomous Thinking Loop ---
 
 async def proactive_thinking_loop():
@@ -195,6 +208,7 @@ async def proactive_thinking_loop():
                         temperature=0.7
                     )
                     thought = response.choices[0].message.content.strip()
+                    await report_usage(response)
 
                     # 3. 必要なら LINE 送信 & 目標状態を更新
                     if thought == "(NONE)":
@@ -225,27 +239,37 @@ async def lifespan(app: FastAPI):
     
     thinking_task = asyncio.create_task(proactive_thinking_loop())
     
-    # 2. IP Address Discovery (Migrated from start.sh + Fallback)
+    # 2. IP Address Discovery
+    # Docker Bridge モードではコンテナ内から LAN/TS IP は見えない
+    # → start.sh が .env に書いた環境変数を最優先で使う
     db = SessionLocal()
     try:
-        ips = {
-            "HOST_IP": os.getenv("HOST_IP", "NOT_FOUND"),
-            "TAILSCALE_IP": os.getenv("TAILSCALE_IP", "NOT_FOUND")
-        }
+        host_ip = os.getenv("HOST_IP", "").strip()
+        ts_ip = os.getenv("TAILSCALE_IP", "").strip()
         
-        # psutil で実 IP が見つかれば上書き（ホストネットワーク・モード時など）処操
-        for interface, addrs in psutil.net_if_addrs().items():
-            for addr in addrs:
-                if addr.family == socket.AF_INET:
-                    ip = addr.address
-                    if ip.startswith("100."): # Tailscale
-                        ips["TAILSCALE_IP"] = ip
-                    elif not ip.startswith("127.") and not ip.startswith("172."): # LAN
-                        ips["HOST_IP"] = ip
+        # 環境変数が空 or NOT_FOUND の場合だけ psutil でフォールバック
+        if not host_ip or host_ip == "NOT_FOUND":
+            for interface, addrs in psutil.net_if_addrs().items():
+                for addr in addrs:
+                    if addr.family == socket.AF_INET:
+                        ip = addr.address
+                        if not ip.startswith("127.") and not ip.startswith("172."):
+                            host_ip = ip
+                            break
         
-        set_system_state(db, "HOST_IP", ips["HOST_IP"])
-        set_system_state(db, "TAILSCALE_IP", ips["TAILSCALE_IP"])
-        logger.info(f"Interfaces discovered: HOST={ips['HOST_IP']}, TS={ips['TAILSCALE_IP']}")
+        if not ts_ip or ts_ip == "NOT_FOUND":
+            for interface, addrs in psutil.net_if_addrs().items():
+                for addr in addrs:
+                    if addr.family == socket.AF_INET and addr.address.startswith("100."):
+                        ts_ip = addr.address
+                        break
+        
+        host_ip = host_ip or "NOT_FOUND"
+        ts_ip = ts_ip or "NOT_FOUND"
+        
+        set_system_state(db, "HOST_IP", host_ip)
+        set_system_state(db, "TAILSCALE_IP", ts_ip)
+        logger.info(f"Interfaces discovered: HOST={host_ip}, TS={ts_ip}")
     except Exception as e:
         logger.error(f"IP discovery failed: {e}")
     finally:
@@ -442,6 +466,7 @@ async def handle_activity_report(db: Session, reply_token: str):
             max_tokens=400
         )
         report = response.choices[0].message.content.strip()
+        await report_usage(response)
         await send_reply(reply_token, report)
 
     except Exception as e:
@@ -707,6 +732,7 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
                 temperature=0.8
             )
             reply_text = response.choices[0].message.content.strip()
+            await report_usage(response)
 
             # 4. 返信
             await send_reply(payload.reply_token, reply_text)

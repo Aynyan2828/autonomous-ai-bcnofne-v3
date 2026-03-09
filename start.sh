@@ -33,16 +33,15 @@ if [ -z "$LOCAL_IP" ]; then
 fi
 echo "FOUND LOCAL IP: ${LOCAL_IP}"
 
-# Update .env file with current IPs
+# Update .env file with current IPs (重複防止: 古い値を削除してから追記)
 if [ -f .env ]; then
     sed -i '/^HOST_IP=/d' .env
     sed -i '/^TAILSCALE_IP=/d' .env
-    echo "HOST_IP=${LOCAL_IP}" >> .env
-    echo "TAILSCALE_IP=${TS_IP}" >> .env
-else
-    echo "HOST_IP=${LOCAL_IP}" > .env
-    echo "TAILSCALE_IP=${TS_IP}" >> .env
+    sed -i '/^WEBHOOK_URL=/d' .env
 fi
+echo "HOST_IP=${LOCAL_IP}" >> .env
+echo "TAILSCALE_IP=${TS_IP}" >> .env
+echo "IP values written to .env: HOST_IP=${LOCAL_IP}, TAILSCALE_IP=${TS_IP}"
 
 # 2. Restart Containers
 echo "====================================="

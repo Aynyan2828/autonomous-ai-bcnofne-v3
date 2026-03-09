@@ -1,5 +1,6 @@
 import os
 import asyncio
+import httpx
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -14,19 +15,51 @@ from shared.logger import ShipLogger
 
 logger = ShipLogger("billing-guard")
 
-# --- Dummy Usage Provider Adapter ---
-class OpenAIApiUsageAdapter:
-    """実際のOpenAI等の課金APIが接続されるまでのダミーアダプタ"""
+# --- OpenAI Usage Tracker ---
+class OpenAIUsageTracker:
+    """
+    OpenAI API の利用状況を追跡する。
+    実際の Usage API が利用できない場合は、core/dev-agent の呼び出しをカウントして概算する。
+    """
     def __init__(self):
-        self.dummy_cost: float = 0.0
+        self._estimated_cost_jpy = 0.0
+        self._request_count = 0
+        self._last_reset_date = datetime.now(timezone.utc).date()
+
+    def _reset_if_new_day(self):
+        today = datetime.now(timezone.utc).date()
+        if today != self._last_reset_date:
+            self._estimated_cost_jpy = 0.0
+            self._request_count = 0
+            self._last_reset_date = today
+
+    def record_request(self, model: str = "gpt-4o-mini", input_tokens: int = 500, output_tokens: int = 500):
+        """API呼び出し1回分のコストを記録する"""
+        self._reset_if_new_day()
+        # GPT-4o-mini の料金 (2024年概算): input=$0.15/1M tokens, output=$0.60/1M tokens
+        # GPT-4o: input=$2.50/1M tokens, output=$10.00/1M tokens
+        cost_usd = 0.0
+        if "4o-mini" in model:
+            cost_usd = (input_tokens * 0.15 + output_tokens * 0.60) / 1_000_000
+        elif "4o" in model:
+            cost_usd = (input_tokens * 2.50 + output_tokens * 10.00) / 1_000_000
+        else:
+            cost_usd = (input_tokens * 0.50 + output_tokens * 1.50) / 1_000_000
+        
+        cost_jpy = cost_usd * 150  # 概算レート
+        self._estimated_cost_jpy += cost_jpy
+        self._request_count += 1
 
     def get_todays_cost_jpy(self) -> float:
-        # 実際にはここに OpenAI usage endpoint 等を叩くロジックを入れる
-        # MVPでは、呼び出すたびに少しずつコストが蓄積するモックとする
-        self.dummy_cost += 15.0 # ダミーのコスト蓄積
-        return self.dummy_cost
+        self._reset_if_new_day()
+        return round(self._estimated_cost_jpy, 2)
 
-usage_adapter = OpenAIApiUsageAdapter()
+    def get_request_count(self) -> int:
+        self._reset_if_new_day()
+        return self._request_count
+
+
+usage_tracker = OpenAIUsageTracker()
 
 # --- Config & Setup ---
 app = FastAPI(title="shipOS Billing Guard")
@@ -58,7 +91,6 @@ def get_install_date(db: Session) -> str:
     return install_date_state.value
 
 def calculate_days_from_start(install_date_str: str) -> int:
-    """システムのインストール日からの日数を計算"""
     try:
         install_date = datetime.fromisoformat(install_date_str).date()
         now_date = datetime.now(timezone.utc).date()
@@ -70,16 +102,18 @@ def is_special_day(days: int) -> bool:
     """0, 6, 12, 18, 24, 30... の特別日判定"""
     return days % 6 == 0
 
+def enforce_limits(db: Session):
+    """課金上限チェック"""
     install_date_str = get_install_date(db)
     days_running = calculate_days_from_start(install_date_str)
     special_day = is_special_day(days_running)
-    current_cost_jpy = usage_adapter.get_todays_cost_jpy()
+    current_cost_jpy = usage_tracker.get_todays_cost_jpy()
 
     # 閾値設定
     if special_day:
         warning_threshold, alert_threshold, stop_threshold = 500, 900, 1000
     else:
-        warning_threshold, alert_threshold, stop_threshold = 200, 200, 300 # 通常日は200で注意、300で即停止
+        warning_threshold, alert_threshold, stop_threshold = 200, 200, 300
 
     alert_state = db.query(SystemState).filter_by(key="billing_alert_level").first()
     current_alert_level = alert_state.value if alert_state else "NORMAL"
@@ -100,18 +134,14 @@ def is_special_day(days: int) -> bool:
         log_msg = f"【注意】本日の課金額が{warning_threshold}円を超過しました。（現在: {current_cost_jpy}円）"
 
     if new_alert_level != "NORMAL" and current_alert_level != new_alert_level:
-        # アラートレベル更新
         if alert_state:
             alert_state.value = new_alert_level
         else:
             db.add(SystemState(key="billing_alert_level", value=new_alert_level))
         
-        # ログ記録
         if log_msg:
             log_event(db, "CRITICAL" if should_stop_ai else "WARN", log_msg)
-            # Todo: Notify core via LINE here or from core's internal watchdog
         
-        # AI停止措置 (core等他サービスにストップを伝えるフラグをDBにセット)
         if should_stop_ai:
             ai_status = db.query(SystemState).filter_by(key="ai_status").first()
             if not ai_status:
@@ -133,7 +163,6 @@ async def billing_monitor_task():
     while True:
         try:
             db = SessionLocal()
-            # Wait for table creation
             try:
                 db.execute("SELECT 1 FROM system_state LIMIT 1")
             except Exception:
@@ -149,10 +178,9 @@ async def billing_monitor_task():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     task = asyncio.create_task(billing_monitor_task())
+    logger.info("Billing Guard started. Monitoring API costs.")
     yield
-    # Shutdown
     task.cancel()
 
 app.router.lifespan_context = lifespan
@@ -167,7 +195,8 @@ def get_billing_status(db: Session = Depends(get_db)):
     install_date_str = get_install_date(db)
     days_running = calculate_days_from_start(install_date_str)
     special_day = is_special_day(days_running)
-    current_cost_jpy = usage_adapter.get_todays_cost_jpy()
+    current_cost_jpy = usage_tracker.get_todays_cost_jpy()
+    request_count = usage_tracker.get_request_count()
     
     if special_day:
         warning_threshold, alert_threshold, stop_threshold = 500, 900, 1000
@@ -177,12 +206,10 @@ def get_billing_status(db: Session = Depends(get_db)):
     alert_state = db.query(SystemState).filter_by(key="billing_alert_level").first()
     alert_level = alert_state.value if alert_state else "NORMAL"
     
-    total_cost_jpy = current_cost_jpy # MVP: 今回は今日の分だけとする
-    total_requests = 0 # MVP: まだカウントしていない
-    
     return {
         "status": "ok",
         "current_cost_jpy": current_cost_jpy,
+        "request_count": request_count,
         "days_running": days_running,
         "start_date": install_date_str,
         "is_special_day": special_day,
@@ -190,16 +217,20 @@ def get_billing_status(db: Session = Depends(get_db)):
         "warning_threshold": warning_threshold,
         "alert_threshold": alert_threshold,
         "stop_threshold": stop_threshold,
-        "total_cost_jpy": total_cost_jpy,
-        "total_requests": total_requests
     }
+
+@app.post("/record")
+def record_usage(model: str = "gpt-4o-mini", input_tokens: int = 500, output_tokens: int = 500):
+    """他サービスから呼ばれ、API使用量を記録する"""
+    usage_tracker.record_request(model=model, input_tokens=input_tokens, output_tokens=output_tokens)
+    return {"status": "recorded", "current_cost_jpy": usage_tracker.get_todays_cost_jpy()}
 
 @app.post("/check_high_cost_operation")
 def check_operation(estimated_cost_jpy: float, db: Session = Depends(get_db)):
     install_date_str = get_install_date(db)
     days_running = calculate_days_from_start(install_date_str)
     special_day = is_special_day(days_running)
-    current_cost_jpy = usage_adapter.get_todays_cost_jpy()
+    current_cost_jpy = usage_tracker.get_todays_cost_jpy()
     
     stop_threshold = 1000 if special_day else 300
     if current_cost_jpy + estimated_cost_jpy >= stop_threshold:
