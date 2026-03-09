@@ -89,5 +89,12 @@ class AutoImprovementProposal(Base):
     diff_content = Column(Text, nullable=True) # 生成された差分
     test_results = Column(Text, nullable=True) # テスト結果要約
     status = Column(String, default=ProposalStatus.PENDING.value, index=True)
+    
+    # 失敗解析用メタデータ
+    failure_stage = Column(String, nullable=True) # observation, generation, verification, apply
+    failure_count = Column(Integer, default=0)
+    last_error_summary = Column(Text, nullable=True)
+    attempt_history = Column(Text, nullable=True) # JSON形式の履歴
+    
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

@@ -15,6 +15,7 @@ from openai import AsyncOpenAI
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 AI_NAME = os.getenv("AI_NAME", "AYN")
 AI_USER_NAME = os.getenv("AI_USER_NAME", "マスター")
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "aynyan-secret-2828")
 
 SYSTEM_PROMPT = f"""
 あなたは自律型AIエージェント『{AI_NAME}』です。
@@ -530,7 +531,9 @@ async def handle_proposal_approve(reply_token: str, prop_id: str):
             if r.status_code == 200:
                 # dev-agent に伝達
                 try:
-                    await client.post(f"http://dev-agent:8013/apply/{prop_id}", timeout=5.0)
+                    await client.post(f"http://dev-agent:8013/apply/{prop_id}", 
+                                     headers={"X-Internal-Token": INTERNAL_TOKEN},
+                                     timeout=5.0)
                     await send_reply(reply_token, f"了解！改修案 {prop_id} の出航（適用）を許可したばい。整備を開始するけん、ちょっと待っとってね！")
                     # バックグラウンドで完了を監視して報告する
                     asyncio.create_task(_monitor_apply_result(prop_id, admin_user_id))
@@ -589,7 +592,9 @@ async def handle_sync_command(reply_token: str):
     try:
         async with httpx.AsyncClient() as client:
             # dev-agent の /sync エンドポイントを叩く
-            resp = await client.post("http://dev-agent:8013/sync", timeout=40.0)
+            resp = await client.post("http://dev-agent:8013/sync", 
+                                    headers={"X-Internal-Token": INTERNAL_TOKEN},
+                                    timeout=40.0)
             if resp.status_code == 200:
                 data = resp.json()
                 msg = data.get("message", "同期が完了したばい！")
@@ -615,7 +620,9 @@ async def handle_update_command(reply_token: str):
     await send_reply(reply_token, "了解！フルアップデートを開始するばい！\n\n① パーミッション修正\n② 最新コード取得\n③ 全コンテナ再起動\n\nしばらく反応できんくなるけん、待っとってね！🚢💨")
     try:
         async with httpx.AsyncClient() as client:
-            await client.post("http://dev-agent:8013/update", timeout=5.0)
+            await client.post("http://dev-agent:8013/update", 
+                             headers={"X-Internal-Token": INTERNAL_TOKEN},
+                             timeout=5.0)
     except Exception as e:
         logger.error(f"Failed to trigger update: {e}")
 

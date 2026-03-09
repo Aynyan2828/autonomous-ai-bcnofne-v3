@@ -1,6 +1,6 @@
 import os
 import httpx
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Header, Depends
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
@@ -16,6 +16,13 @@ app = FastAPI(title="shipOS LINE Gateway")
 
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "dummy_token")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "dummy_secret")
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "aynyan-secret-2828")
+
+def verify_internal_token(x_internal_token: str = Header(None)):
+    if not x_internal_token or x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden: Invalid or missing Internal Token")
+    return True
+
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
@@ -73,7 +80,7 @@ async def forward_to_core(text: str, user_id: str, reply_token: str):
         logger.error(f"Failed to forward message to core: {e}")
 
 @app.post("/api/v1/reply")
-def reply_message(reply_token: str, text: str):
+def reply_message(reply_token: str, text: str, _: bool = Depends(verify_internal_token)):
     """Coreから呼ばれ、LINEユーザーに返信するエンドポイント"""
     try:
         line_bot_api.reply_message(reply_token, TextSendMessage(text=text))
@@ -82,7 +89,7 @@ def reply_message(reply_token: str, text: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/push")
-def push_message(req: PushMessageRequest):
+def push_message(req: PushMessageRequest, _: bool = Depends(verify_internal_token)):
     """Coreから呼ばれ、AIから能動的にLINE通知するエンドポイント"""
     try:
         line_bot_api.push_message(req.user_id, TextSendMessage(text=req.text))

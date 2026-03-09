@@ -2,7 +2,7 @@ import os
 import asyncio
 import httpx
 import docker
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
 
@@ -16,6 +16,12 @@ from shared.logger import ShipLogger
 logger = ShipLogger("watchdog")
 
 app = FastAPI(title="BCNOFNe Watchdog")
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "aynyan-secret-2828")
+
+def verify_internal_token(x_internal_token: str = Header(None)):
+    if not x_internal_token or x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden: Invalid or missing Internal Token")
+    return True
 
 SERVICES_TO_MONITOR = [
     {"name": "core", "url": "http://core:8000/health"},
@@ -86,7 +92,7 @@ def health_check():
     return {"status": "ok", "service": "watchdog"}
 
 @app.post("/restart")
-async def restart_system(background_tasks: BackgroundTasks):
+async def restart_system(background_tasks: BackgroundTasks, _: bool = Depends(verify_internal_token)):
     """
     全コンテナを再起動するエンドポイント
     """

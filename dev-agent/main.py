@@ -7,8 +7,9 @@ import subprocess
 import json
 import uuid
 import traceback
-from datetime import datetime, timezone
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+import difflib
+from datetime import datetime, timezone, timedelta
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 
@@ -18,7 +19,7 @@ from shared.logger import ShipLogger
 from shared.database import SessionLocal
 from shared.models import SystemState
 
-VERSION = "v3.1.5-fix"
+VERSION = "v3.2.6"
 print(f"AYN {VERSION} STARTING... (CWD: {os.getcwd()})")
 
 logger = ShipLogger("dev-agent")
@@ -41,6 +42,22 @@ async def _report_billing(response, model: str = "gpt-4o-mini"):
 SRC_DIR = "/app/src"
 WORKSPACE_DIR = "/app/workspace"
 MEMORY_SERVICE_URL = "http://memory-service:8003"
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "aynyan-secret-2828")
+ALLOWED_SERVICES = ["core", "line-gateway", "watchdog", "dev-agent"]
+
+def verify_internal_token(x_internal_token: str = Header(None)):
+    if not x_internal_token or x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden: Invalid or missing Internal Token")
+    return True
+
+def is_git_dirty() -> bool:
+    """Git に未コミットの変更があるかチェック"""
+    try:
+        res = subprocess.run(["git", "-C", SRC_DIR, "status", "--porcelain"], 
+                             capture_output=True, text=True, check=True)
+        return len(res.stdout.strip()) > 0
+    except:
+        return False
 
 def set_system_state_helper(key: str, value: str):
     db = SessionLocal()
@@ -66,6 +83,7 @@ async def send_push_notification(text: str):
         try:
             await client.post("http://line-gateway:8001/api/v1/push", 
                              json={"user_id": admin_id, "text": text},
+                             headers={"X-Internal-Token": INTERNAL_TOKEN},
                              timeout=5.0)
         except Exception as e:
             logger.error(f"Failed to send push notification: {e}")
@@ -78,10 +96,14 @@ def health_check():
     return {"status": "ok", "service": "dev-agent"}
 
 @app.post("/sync")
-async def sync_repository():
+async def sync_repository(_: bool = Depends(verify_internal_token)):
     """
     GitHub から最新のソースコードを取得するエンドポイント
     """
+    if is_git_dirty():
+        msg = "⚠️ Git に未コミットの変更があるため、同期を中止したばい。マスターに確認してね。"
+        await send_push_notification(msg)
+        return {"status": "error", "message": msg}
     try:
         # 1. Git pull 実行
         logger.info("Starting git pull from origin main...")
@@ -114,8 +136,12 @@ async def sync_repository():
         }
 
 @app.post("/update")
-async def update_system(background_tasks: BackgroundTasks):
+async def update_system(background_tasks: BackgroundTasks, _: bool = Depends(verify_internal_token)):
     """chown + git pull + restart を一括実行するエンドポイント"""
+    if is_git_dirty():
+        msg = "⚠️ Git に未コミットの変更があるため、アップデートを中止したばい。"
+        await send_push_notification(msg)
+        return {"status": "error", "message": msg}
     background_tasks.add_task(execute_full_update)
     return {"status": "queued", "message": "フルアップデートを開始するばい！"}
 
@@ -161,7 +187,9 @@ async def execute_full_update():
         # watchdog に再起動をリクエスト
         async with httpx.AsyncClient() as client:
             try:
-                await client.post("http://watchdog:8005/restart", timeout=5.0)
+                await client.post("http://watchdog:8005/restart", 
+                                 headers={"X-Internal-Token": INTERNAL_TOKEN},
+                                 timeout=5.0)
             except Exception:
                 pass  # watchdog が再起動するので接続切れは想定内
     
@@ -170,7 +198,7 @@ async def execute_full_update():
         await send_push_notification(f"⚠️ アップデート中にエラー: {e}")
 
 @app.post("/apply/{proposal_id}")
-async def apply_proposal(proposal_id: str, background_tasks: BackgroundTasks):
+async def apply_proposal(proposal_id: str, background_tasks: BackgroundTasks, _: bool = Depends(verify_internal_token)):
     """
     承認された提案を本番環境へ反映させるエンドポイント
     core サービスから呼び出されることを想定
@@ -211,10 +239,23 @@ async def execute_apply(proposal_id: str):
             # ★恒久対策: git 操作後に .git の所有権をホスト側ユーザー (UID 1000 = pi) に戻す
             _fix_git_permissions()
 
-        # 3. 反映実行 (workspace から src へコピー)
+        # 3. 反映実行前の最終検証 (Pre-verify in workspace)
         plan = json.loads(proposal.get("plan_json", "{}"))
         files = plan.get("files", [])
         
+        for f_path in files:
+            work_full = os.path.join(WORKSPACE_DIR, f_path)
+            if f_path.endswith(".py") and os.path.exists(work_full):
+                res_test = subprocess.run(["python3", "-m", "py_compile", work_full], capture_output=True, text=True)
+                if res_test.returncode != 0:
+                    logger.error(f"Final verification FAILED for {f_path} in proposal {proposal_id}")
+                    await send_push_notification(f"⚠️ 改修案 {proposal_id} の適用を中止したばい。最終検証でエラーが出たよ：\n{res_test.stderr}")
+                    async with httpx.AsyncClient() as client:
+                        await client.patch(f"{MEMORY_SERVICE_URL}/proposals/{proposal_id}", 
+                                         json={"status": "FAILED", "failure_stage": "apply", "last_error_summary": res_test.stderr})
+                    return
+
+        # 4. 反映実行 (workspace から src へコピー)
         for f_path in files:
             src_full = os.path.join(SRC_DIR, f_path)
             work_full = os.path.join(WORKSPACE_DIR, f_path)
@@ -265,38 +306,35 @@ async def development_loop():
     await asyncio.sleep(30) # 他のサービスの起動を待つ
     
     while True:
+        next_sleep = 3600
         try:
             # (1) Observe & Think
             # ログやメトリクスを収集し、OpenAI に相談
-            await run_autonomous_observation()
+            result = await run_autonomous_observation()
+            if result == "generation_failed":
+                next_sleep = 600
+            elif result == "memory_error":
+                next_sleep = 300
             
         except Exception as e:
             error_trace = traceback.format_exc()
             logger.error(f"Development loop error: {e}\n{error_trace}")
+            next_sleep = 300
             
-        # 1時間おきに繰り返すが、エラー時は少し早めにリトライを試みる
-        await asyncio.sleep(3600)
+        logger.info(f"Loop finished. Sleeping for {next_sleep}s...")
+        await asyncio.sleep(next_sleep)
 
 async def safe_get_memory_summary(client):
-    """memory-service からの要約取得をリトライ付きで実行"""
-    urls = [MEMORY_SERVICE_URL, "http://shipos-memory-service:8003"]
-    for i in range(10):
-        url = urls[0] if i % 2 == 0 else urls[1]
+    """memory-service からの要約取得を指数バックオフ付きで実行"""
+    for attempt in range(5):
         try:
-            r = await client.get(f"{url}/summary", timeout=10.0)
+            r = await client.get(f"{MEMORY_SERVICE_URL}/summary", timeout=10.0)
             if r.status_code == 200:
                 return r.json().get("summary", "")
-            else:
-                logger.warn(f"Failed to fetch memory summary (attempt {i+1}) from {url}: HTTP {r.status_code}")
         except Exception as e:
-            import socket
-            hostname = url.split("//")[-1].split(":")[0]
-            try:
-                ip = socket.gethostbyname(hostname)
-            except:
-                ip = "Unknown"
-            logger.warn(f"Failed to fetch memory summary (attempt {i+1}) from {url} ({ip}): {type(e).__name__} - {str(e)}")
-            await asyncio.sleep(5)
+            wait_time = 2 ** attempt
+            logger.warn(f"Failed to fetch memory summary (attempt {attempt+1}): {e}. Retrying in {wait_time}s...")
+            await asyncio.sleep(wait_time)
     return "N/A"
 
 async def run_autonomous_observation():
@@ -306,8 +344,10 @@ async def run_autonomous_observation():
     
     # 1. データの収集
     async with httpx.AsyncClient() as client:
-        # 直近ログ (リトライ付き)
+        # 直近ログ (指数バックオフ付き)
         brain_context = await safe_get_memory_summary(client)
+        if brain_context == "N/A":
+            return "memory_error"
         
         # 現在の提案（PENDING が多すぎればスキップ）
         try:
@@ -318,7 +358,7 @@ async def run_autonomous_observation():
         
     if pending_count >= 3:
         logger.info("Too many pending proposals. Skipping observation.")
-        return
+        return "skipped"
 
     # 2. OpenAI による分析
     prompt = f"""
@@ -356,11 +396,12 @@ async def run_autonomous_observation():
         
         # (3) Plan & (4) Build & (5) Test
         # 実際に workspace でコード生成を試みる
-        await process_suggestion(suggestion)
+        return await process_suggestion(suggestion)
 
     except Exception as e:
         error_trace = traceback.format_exc()
         logger.error(f"Observation / Suggestion error: {e}\n{error_trace}")
+        return "generation_failed"
 
 async def process_suggestion(suggestion):
     """提案された内容を実際に workspace で実装・テストする (リトライ機能付き)"""
@@ -370,7 +411,7 @@ async def process_suggestion(suggestion):
     
     files = suggestion.get("files", [])
     if not files:
-        return
+        return "skipped"
 
     # 1. Workspace の準備
     for f in files:
@@ -387,9 +428,10 @@ async def process_suggestion(suggestion):
     # 2. & 3. 差分生成とテストのリトライループ (最大3回)
     max_attempts = 3
     success = False
-    test_report = ""
     full_diff = ""
-    errors_feedback = "" # AIへのフィードバック用
+    errors_feedback_dict = {} # ファイル単位のエラー情報: {path: error_msg}
+    attempt_history = []
+    last_error_summary = ""
 
     for attempt in range(1, max_attempts + 1):
         logger.info(f"Development attempt {attempt}/{max_attempts} for {prop_id}")
@@ -397,20 +439,25 @@ async def process_suggestion(suggestion):
             set_system_state_helper("ai_target_goal", f"デバッグ中ばい({attempt}回目): {prop_id}")
 
         current_attempt_success = True
-        current_attempt_report = f"--- Attempt {attempt} ---\n"
+        current_attempt_files_report = {} # {path: status_msg}
+        attempt_log = {"attempt": attempt, "results": {}}
         
         # 各ファイルの生成
         for f in files:
             work_path = os.path.join(WORKSPACE_DIR, f)
+            src_path = os.path.join(SRC_DIR, f)
+            
+            # 元のコード（比較用と生成用）
             original_code = ""
-            if os.path.exists(work_path) and attempt == 1:
-                # 初回のみ現在のファイルを読み取る（2回目以降は前回生成したファイルが work_path にある）
-                with open(work_path, "r") as f_in:
+            if os.path.exists(src_path):
+                with open(src_path, "r") as f_in:
                     original_code = f_in.read()
-            elif attempt > 1:
-                # リトライ時は「直前の失敗コード」を元に修正させるため、再度読み込む
+            
+            # 生成ベースコード（リトライ時は前回の workspace コード）
+            base_code_for_ai = original_code
+            if attempt > 1 and os.path.exists(work_path):
                 with open(work_path, "r") as f_in:
-                    original_code = f_in.read()
+                    base_code_for_ai = f_in.read()
 
             edit_prompt = f"""
 ファイル: {f}
@@ -418,12 +465,12 @@ async def process_suggestion(suggestion):
 現在の試行回数: {attempt}/{max_attempts}
 
 【指示】
-現在のコードを読み、計画に沿って修正した「完全な新しいコード」を出力してください。
+現在のコードを読み、計画に沿って修正した「完全な新しいコード」を返してください。
 """
-            if errors_feedback:
-                edit_prompt += f"\n【前回の失敗原因 (Syntax Error)】\n{errors_feedback}\nこのエラーを解消するように修正してください。"
+            if errors_feedback_dict:
+                edit_prompt += f"\n【前回までのエラー情報 (構造化)】\n{json.dumps(errors_feedback_dict, indent=2, ensure_ascii=False)}\n特に自分が修正担当しているファイルのエラー箇所を重点的に直してください。"
 
-            edit_prompt += f"\n\n【現在のコード】\n{original_code}\n\n余計な解説は不要です。コードのみ出力してください。"
+            edit_prompt += f"\n\n【ベースコード】\n{base_code_for_ai}\n\n余計な解説は不要です。コードのみ出力してください。"
 
             res = await openai_client.chat.completions.create(
                 model="gpt-4o",
@@ -437,25 +484,52 @@ async def process_suggestion(suggestion):
             with open(work_path, "w") as f_out:
                 f_out.write(new_code)
             
-            # テスト (Syntax Check)
+            # --- 二段階検証 ---
+            file_error = None
             if f.endswith(".py"):
-                res_test = subprocess.run(["python3", "-m", "py_compile", work_path], capture_output=True, text=True)
-                if res_test.returncode != 0:
-                    current_attempt_success = False
-                    current_attempt_report += f"❌ Syntax check failed: {f}\n{res_test.stderr}\n"
-                    errors_feedback = res_test.stderr # 次のリトライ用のフィードバック
+                # Step 1: Syntax Check
+                res_syntax = subprocess.run(["python3", "-m", "py_compile", work_path], capture_output=True, text=True)
+                if res_syntax.returncode != 0:
+                    file_error = f"Syntax Error:\n{res_syntax.stderr}"
                 else:
-                    current_attempt_report += f"✅ Syntax check passed: {f}\n"
+                    # Step 2: Import Check (簡易)
+                    env = os.environ.copy()
+                    env["PYTHONPATH"] = f"/app:{env.get('PYTHONPATH', '')}"
+                    mod_path = f.replace("/", ".").replace(".py", "")
+                    res_import = subprocess.run(["python3", "-c", f"import {mod_path}"], 
+                                               env=env, capture_output=True, text=True)
+                    if res_import.returncode != 0:
+                        file_error = f"Import/Runtime Error:\n{res_import.stderr}"
+
+            if file_error:
+                current_attempt_success = False
+                errors_feedback_dict[f] = file_error
+                current_attempt_files_report[f] = "FAILED"
+                last_error_summary = f"File {f}: {file_error.splitlines()[0]}"
+            else:
+                current_attempt_files_report[f] = "PASSED"
+                if f in errors_feedback_dict: del errors_feedback_dict[f] 
+            
+            attempt_log["results"][f] = {"status": current_attempt_files_report[f], "error": file_error}
+
+        attempt_history.append(attempt_log)
 
         if current_attempt_success:
             success = True
-            test_report = current_attempt_report
-            # Diffの簡易生成（全ファイル分）
+            # Unified Diff の生成
             for f in files:
-                full_diff += f"--- {f} (updated)\n(Code generated/fixed in attempt {attempt})\n\n"
+                work_path = os.path.join(WORKSPACE_DIR, f)
+                src_path = os.path.join(SRC_DIR, f)
+                old_lines = []
+                if os.path.exists(src_path):
+                    with open(src_path, "r") as f_in:
+                        old_lines = f_in.readlines()
+                with open(work_path, "r") as f_in:
+                    new_lines = f_in.readlines()
+                
+                diff = difflib.unified_diff(old_lines, new_lines, fromfile=f"a/{f}", tofile=f"b/{f}")
+                full_diff += "".join(diff) + "\n"
             break
-        else:
-            test_report = current_attempt_report # 最終的なレポート用に保存
 
     # 4. 提案の保存
     async with httpx.AsyncClient() as client:
@@ -464,7 +538,7 @@ async def process_suggestion(suggestion):
             logger.info(f"Proposal {prop_id} ready after {attempt} attempts.")
         else:
             logger.warn(f"Auto-discarding proposal {prop_id} after {max_attempts} failed attempts.")
-            set_system_state_helper("ai_target_goal", f"改修案 {prop_id} は3回直そうとしたばってん、ダメやった...")
+            set_system_state_helper("ai_target_goal", f"改修案 {prop_id} は3回試行したばってん、ダメやった...")
 
         await client.post(f"{MEMORY_SERVICE_URL}/proposals/", json={
             "id": prop_id,
@@ -473,8 +547,12 @@ async def process_suggestion(suggestion):
             "plan_json": json.dumps({"files": files, "plan": suggestion["plan"]}),
             "files_affected": ", ".join(files),
             "diff_content": full_diff,
-            "test_results": test_report,
-            "status": status
+            "test_results": f"Attempts: {attempt}\nSuccess: {success}\n" + json.dumps(current_attempt_files_report, indent=2),
+            "status": status,
+            "failure_stage": "verification" if not success else None,
+            "failure_count": attempt if not success else 0,
+            "last_error_summary": last_error_summary if not success else None,
+            "attempt_history": json.dumps(attempt_history, ensure_ascii=False)
         })
 
     # 5. LINE 通知を core に依頼 (成功時のみ)
@@ -484,7 +562,12 @@ async def process_suggestion(suggestion):
             report_msg = f"【整備報告】\n{suggestion['title']}の改修案がまとまったばい！{attempts_msg}\n確認して出航（承認）ばお願い！\n\nID: {prop_id}"
             admin_id = os.getenv("LINE_ADMIN_USER_ID", "")
             if admin_id:
-                await client.post("http://line-gateway:8001/api/v1/push", json={"user_id": admin_id, "text": report_msg})
+                async with httpx.AsyncClient() as client:
+                    await client.post("http://line-gateway:8001/api/v1/push", 
+                                     json={"user_id": admin_id, "text": report_msg},
+                                     headers={"X-Internal-Token": INTERNAL_TOKEN})
+    
+    return "success" if success else "verification_failed"
 
 @app.on_event("startup")
 async def startup_event():
