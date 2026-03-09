@@ -96,5 +96,10 @@ class AutoImprovementProposal(Base):
     last_error_summary = Column(Text, nullable=True)
     attempt_history = Column(Text, nullable=True) # JSON形式の履歴
     
+    # 推論メタデータ
+    target_selection_reason = Column(Text, nullable=True) # なぜそのファイルを選んだか
+    confidence = Column(Float, default=0.0) # 選定の自信度 (0.0-1.0)
+    evidence_summary = Column(Text, nullable=True) # 根拠となった統計・ログの要約
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

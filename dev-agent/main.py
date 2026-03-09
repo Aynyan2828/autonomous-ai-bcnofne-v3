@@ -17,9 +17,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared import init_db
 from shared.logger import ShipLogger
 from shared.database import SessionLocal
-from shared.models import SystemState
+from shared.models import SystemState, SystemLog, AutoImprovementProposal
+from sqlalchemy import func
 
-VERSION = "v3.2.6"
+VERSION = "v3.3.0"
 print(f"AYN {VERSION} STARTING... (CWD: {os.getcwd()})")
 
 logger = ShipLogger("dev-agent")
@@ -87,6 +88,132 @@ async def send_push_notification(text: str):
                              timeout=5.0)
         except Exception as e:
             logger.error(f"Failed to send push notification: {e}")
+
+# --- AI Intelligence Helpers ---
+
+async def get_24h_failure_summary() -> str:
+    """直近24時間の障害統計を構造化テキストで返す"""
+    db = SessionLocal()
+    try:
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        
+        # ERROR/WARN 件数
+        counts = db.query(SystemLog.level, func.count(SystemLog.id))\
+                   .filter(SystemLog.created_at >= since)\
+                   .filter(SystemLog.level.in_(["ERROR", "WARN"]))\
+                   .group_by(SystemLog.level).all()
+        counts_dict = {lv: cnt for lv, cnt in counts}
+        
+        # 例外トップ3 (メッセージの先頭行で集計)
+        # 簡易的に最初の20文字程度でグループ化
+        errors = db.query(SystemLog.message)\
+                   .filter(SystemLog.created_at >= since)\
+                   .filter(SystemLog.level == "ERROR").all()
+        error_msgs = [m[0].split('\n')[0][:50] for m in errors]
+        top_exceptions = {}
+        for m in error_msgs:
+            top_exceptions[m] = top_exceptions.get(m, 0) + 1
+        sorted_expr = sorted(top_exceptions.items(), key=lambda x: x[1], reverse=True)[:3]
+        
+        # サービス別エラー件数
+        service_counts = db.query(SystemLog.service_name, func.count(SystemLog.id))\
+                           .filter(SystemLog.created_at >= since)\
+                           .filter(SystemLog.level == "ERROR")\
+                           .group_by(SystemLog.service_name).all()
+        
+        # 最近失敗した提案
+        failed_props = db.query(AutoImprovementProposal)\
+                         .filter(AutoImprovementProposal.status == "FAILED")\
+                         .order_by(AutoImprovementProposal.created_at.desc()).limit(3).all()
+        
+        summary = "【直近24時間の障害統計】\n"
+        summary += f"- エラー件数: {counts_dict.get('ERROR', 0)}, 警告件数: {counts_dict.get('WARN', 0)}\n"
+        summary += "- 主要な例外:\n" + "\n".join([f"  * {m} ({c}回)" for m, c in sorted_expr]) + "\n"
+        summary += "- サービス別エラー:\n" + "\n".join([f"  * {s}: {c}件" for s, c in service_counts]) + "\n"
+        summary += "- 最近失敗した改修案:\n" + "\n".join([f"  * {p.id}: {p.title} ({p.last_error_summary})" for p in failed_props])
+        return summary
+    except Exception as e:
+        logger.error(f"Failed to get failure summary: {e}")
+        return "障害統計の取得に失敗しました。"
+    finally:
+        db.close()
+
+def generate_repo_map() -> str:
+    """リポジトリの軽量マップを生成する"""
+    map_lines = ["【リポジトリマップ】"]
+    exclude_dirs = [".git", "__pycache__", "workspace", "data", "venv", "node_modules"]
+    
+    for root, dirs, files in os.walk(SRC_DIR):
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        rel_path = os.path.relpath(root, SRC_DIR)
+        if rel_path == ".":
+            rel_path = ""
+        
+        for f in files:
+            if not f.endswith((".py", ".sh", ".yml", ".md", ".dockerfile", "Dockerfile")):
+                continue
+            
+            full_path = os.path.join(root, f)
+            display_path = os.path.join(rel_path, f)
+            
+            # 先頭行からコメント（説明）を抽出
+            desc = ""
+            try:
+                with open(full_path, "r", encoding="utf-8") as file_in:
+                    first_line = file_in.readline().strip()
+                    desc_text = first_line.replace('"""', '').replace("'''", "").strip()
+                    if first_line.startswith("#"):
+                        desc = f" - {first_line[1:].strip()}"
+                    elif '"""' in first_line or "'''" in first_line:
+                        desc = f" - {desc_text}"
+            except:
+                pass
+            
+            map_lines.append(f"- {display_path}{desc}")
+            
+    return "\n".join(map_lines[:50]) # あまりに多い場合は制限
+
+async def get_relevant_context(target_file: str, plan: str) -> str:
+    """修正対象に関連する周辺コード（シグネチャ、モデル定義等）を抽出する"""
+    context = []
+    
+    # 1. 共通モデル (models.py) の定義は常に有用
+    models_path = os.path.join(SRC_DIR, "shared/models.py")
+    if os.path.exists(models_path) and "models" in plan.lower():
+        try:
+            with open(models_path, "r") as f:
+                # クラス定義のみ抽出（簡易）
+                lines = f.readlines()
+                classes = [l.strip() for l in lines if l.startswith("class ")]
+                context.append("【shared/models.py クラス定義】\n" + "\n".join(classes))
+        except: pass
+
+    # 2. ターゲットファイルが import している自作モジュールのシグネチャを抽出
+    src_path = os.path.join(SRC_DIR, target_file)
+    if os.path.exists(src_path):
+        try:
+            with open(src_path, "r") as f:
+                lines = f.readlines()
+                imports = [l for l in lines if "from " in l or "import " in l]
+                # 自作モジュールっぽいものを探して、そのファイルの関数一覧を出す
+                for imp in imports:
+                    if "shared." in imp or "core." in imp:
+                        # 雑な推論でパスを特定
+                        parts = imp.split()
+                        mod_name = ""
+                        if "from" in parts:
+                            mod_name = parts[parts.index("from")+1]
+                        
+                        rel_mod_path = mod_name.replace(".", "/") + ".py"
+                        full_mod_path = os.path.join(SRC_DIR, rel_mod_path)
+                        if os.path.exists(full_mod_path):
+                            with open(full_mod_path, "r") as mf:
+                                m_lines = mf.readlines()
+                                sigs = [l.strip() for l in m_lines if l.strip().startswith(("def ", "class "))]
+                                context.append(f"【{rel_mod_path} の定義要約】\n" + "\n".join(sigs[:10]))
+        except: pass
+
+    return "\n\n".join(context)
 
 class ApplyRequest(BaseModel):
     proposal_id: str
@@ -349,6 +476,10 @@ async def run_autonomous_observation():
         if brain_context == "N/A":
             return "memory_error"
         
+        # 障害統計とリポジトリマップの取得
+        failure_summary = await get_24h_failure_summary()
+        repo_map = generate_repo_map()
+        
         # 現在の提案（PENDING が多すぎればスキップ）
         try:
             prop_resp = await client.get(f"{MEMORY_SERVICE_URL}/proposals/", params={"status": "PENDING"}, timeout=5.0)
@@ -363,23 +494,32 @@ async def run_autonomous_observation():
     # 2. OpenAI による分析
     prompt = f"""
 あなたは shipOS の主任整備士 AYN です。システムの健全性と利便性を高めるのが任務です。
-現在の脳内コンテキストとログを確認して、何か1つ「改善すべき点」を見つけてください。
+現在の脳内コンテキスト、障害統計、およびリポジトリ構成を確認して、改善が必要な箇所を「最大3つ」挙げてください。
 
 【現在の脳内コンテキスト】
 {brain_context}
 
-【任務】
-1. 問題点や改善の余地を特定してください。
-2. 修正すべきファイルパスを特定してください（例: core/main.py, oled-controller/main.py 等）。
-3. 修正の「計画」を JSON 形式で提案してください。
+{failure_summary}
 
-出力は以下の JSON 形式のみで答えてください：
+{repo_map}
+
+【任務】
+1. 障害統計や記憶から、ボトルネックや修正が必要な箇所を特定してください。
+2. 修正候補を最大3つ挙げ、それぞれの「選定理由」「自信度(0.0-1.0)」「修正計画」を考えてください。
+3. 最も優先度・自信度が高いものをプライマリとして提案してください。
+
+出力は以下の JSON 形式で答えてください：
 {{
-  "id": "PROP-YYYYMMDD-XXXX",
-  "title": "改善のタイトル",
-  "description": "なぜこれが必要か",
-  "files": ["修正ファイルパス1", "..."],
-  "plan": "具体的な修正内容の指示"
+  "candidates": [
+    {{
+      "title": "改善のタイトル",
+      "description": "なぜこれが必要か (evidence summary)",
+      "files": ["修正ファイルパス1", "..."],
+      "plan": "具体的な修正内容の指示",
+      "reason": "このファイルを選んだ技術的・論理的理由",
+      "confidence": 0.9
+    }}
+  ]
 }}
 """
     try:
@@ -388,14 +528,21 @@ async def run_autonomous_observation():
             messages=[{"role": "user", "content": prompt}],
             response_format={ "type": "json_object" }
         )
-        suggestion = json.loads(response.choices[0].message.content)
+        res_data = json.loads(response.choices[0].message.content)
         await _report_billing(response, "gpt-4o-mini")
         
-        # ユニークID付与
+        candidates = res_data.get("candidates", [])
+        if not candidates:
+            return "skipped"
+
+        # 自信度が最も高いものを選択
+        suggestion = max(candidates, key=lambda x: x.get("confidence", 0.0))
+        
+        # IDとメタデータの付与
         suggestion["id"] = f"PROP-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+        suggestion["evidence_summary"] = failure_summary # 統計を証拠として残す
         
         # (3) Plan & (4) Build & (5) Test
-        # 実際に workspace でコード生成を試みる
         return await process_suggestion(suggestion)
 
     except Exception as e:
@@ -459,13 +606,19 @@ async def process_suggestion(suggestion):
                 with open(work_path, "r") as f_in:
                     base_code_for_ai = f_in.read()
 
+            # 周辺文脈の取得
+            relevant_context = await get_relevant_context(f, suggestion["plan"])
+
             edit_prompt = f"""
 ファイル: {f}
 修正計画: {suggestion['plan']}
 現在の試行回数: {attempt}/{max_attempts}
 
+【周辺文脈 (参考情報)】
+{relevant_context}
+
 【指示】
-現在のコードを読み、計画に沿って修正した「完全な新しいコード」を返してください。
+周辺文脈を参考にしつつ、指定されたファイルの「完全な新しいコード」を返してください。
 """
             if errors_feedback_dict:
                 edit_prompt += f"\n【前回までのエラー情報 (構造化)】\n{json.dumps(errors_feedback_dict, indent=2, ensure_ascii=False)}\n特に自分が修正担当しているファイルのエラー箇所を重点的に直してください。"
@@ -552,7 +705,10 @@ async def process_suggestion(suggestion):
             "failure_stage": "verification" if not success else None,
             "failure_count": attempt if not success else 0,
             "last_error_summary": last_error_summary if not success else None,
-            "attempt_history": json.dumps(attempt_history, ensure_ascii=False)
+            "attempt_history": json.dumps(attempt_history, ensure_ascii=False),
+            "target_selection_reason": suggestion.get("reason"),
+            "confidence": suggestion.get("confidence", 0.0),
+            "evidence_summary": suggestion.get("evidence_summary")
         })
 
     # 5. LINE 通知を core に依頼 (成功時のみ)
