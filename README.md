@@ -1,7 +1,7 @@
 # autonomous AI BCNOFNe system v3 (CryptoArk Edition)
 
 Raspberry Pi 4B で稼働する自律型AI「AYN（あゆにゃん）」のための、元素記号をモチーフとした船のシステム『BCNOFNe』です。
-壮大な世界観『CryptoArk』を航海するこの船は、Docker Compose を用いたマイクロサービスアーキテクチャで構成されており、自律的な進化と安全な航行をサポートします。
+壮大な世界観『DYOR島』を目指し航海するこの船は、Docker Compose を用いたマイクロサービスアーキテクチャで構成されており、自律的な進化と安全な航行をサポートします。
 
 ## 要求環境
 - Raspberry Pi 4B (Raspberry Pi OS Bookworm 64bit 推奨)
