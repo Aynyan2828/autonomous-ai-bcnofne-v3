@@ -9,9 +9,10 @@
 # 0. Set working directory to the script's location
 cd "$(dirname "$0")"
 
-# 0.5. Fix git permissions (dev-agent runs as root inside Docker and may change .git ownership)
+# 0.5. Fix git permissions and config
 if [ -d ".git" ]; then
     sudo chown -R $(id -u):$(id -g) .git 2>/dev/null || true
+    git config pull.rebase true 2>/dev/null || true
 fi
 
 # 1. IP Address Discovery

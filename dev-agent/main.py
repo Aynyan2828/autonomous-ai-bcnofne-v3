@@ -73,7 +73,7 @@ async def sync_repository():
         # 1. Git pull 実行
         logger.info("Starting git pull from origin main...")
         res = subprocess.run(
-            ["git", "-C", SRC_DIR, "pull", "origin", "main"],
+            ["git", "-C", SRC_DIR, "pull", "--rebase", "origin", "main"],
             capture_output=True, text=True, timeout=30
         )
         
@@ -125,7 +125,7 @@ async def execute_full_update():
         steps.append(f"git checkout: {'OK' if res.returncode == 0 else res.stderr.strip()[:50]}")
         
         # 3. git pull
-        res = subprocess.run(["git", "-C", SRC_DIR, "pull", "origin", "main"],
+        res = subprocess.run(["git", "-C", SRC_DIR, "pull", "--rebase", "origin", "main"],
                            capture_output=True, text=True, timeout=60, check=False)
         if res.returncode == 0:
             steps.append("git pull: OK")
