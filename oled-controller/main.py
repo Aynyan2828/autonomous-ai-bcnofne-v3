@@ -332,13 +332,10 @@ def update_oled(db: Session):
     ip = get_system_state_val(db, "HOST_IP", "??") 
     ts_ip = get_system_state_val(db, "TAILSCALE_IP", "??")
     
-    # Webhook URL from DB (updated by start.sh)
-    webhook_url = get_system_state_val(db, "last_webhook_url", "")
-    webhook_part = f" WEBHOOK:{webhook_url}" if webhook_url else ""
+    # Webhook は表示しない（長すぎてLAN/TS IPが見えなくなるため）
+    ip_scroll = f"LAN:{ip} TS:{ts_ip}"
     
-    ip_scroll = f"LAN:{ip} TS:{ts_ip}{webhook_part}"
-    
-    # Scroll message setup (Clean ASCII only)
+    # Scroll message setup
     new_scroll = clean_text(get_system_state_val(db, "oled_scroll_msg", "System Online"))
     total_scroll = f"{new_scroll} | {ip_scroll}"
     
@@ -368,7 +365,7 @@ def update_oled(db: Session):
     draw = ImageDraw.Draw(image)
     
     try:
-        # 日本語表示用のフォントをロード (複数パスを試行)
+        # 日本語表示用フォントをロード (複数パスを試行)
         jp_font_paths = [
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
@@ -383,6 +380,9 @@ def update_oled(db: Session):
                 break
         if not font:
             font = ImageFont.load_default()
+            print("[OLED] WARN: No TrueType font found, using default. Japanese may not render.")
+        else:
+            print(f"[OLED] INFO: Font loaded from {p}")
     except Exception as e:
         logger.error(f"Failed to load font: {e}")
         font = ImageFont.load_default()
@@ -391,13 +391,8 @@ def update_oled(db: Session):
     # Line 1: BCNOFNe: SAIL >===> [~]
     draw.text((0, 0), clean_text(f"BCNOFNe:{mode_disp} {mode_emoji}"), font=font, fill=255)
     
-    # Line 2: DEST: [Goal] (スクロール表示)
-    dest_label = "DEST:"
-    label_w = len(dest_label) * 6  # ラベル部分の幅(概算)
-    # ラベルは固定、内容部分だけスクロール
-    draw.text((0, 11), dest_label, font=font, fill=255)
-    # クリップ領域を設けてスクロール
-    draw.text((dest_scroll_pos, 11), dest_scroll_message, font=font, fill=255)
+    # Line 2: DEST: [Goal] (全文スクロール)
+    draw.text((dest_scroll_pos, 11), f"DEST:{dest_scroll_message}", font=font, fill=255)
     
     # Line 3: AI: (face)
     draw.text((0, 22), f"AI: {ai_face}", font=font, fill=255)
@@ -405,22 +400,22 @@ def update_oled(db: Session):
     # Line 4: Hardwares (TEMP/DISK)
     draw.text((0, 33), f"TEMP:{temp:.0f}C DISK:{disk_pct:.0f}%", font=font, fill=255)
     
-    # Line 5: Scrolling message (Includes IPs)
+    # Line 5: Scrolling message (LAN/TS IPs)
     draw.text((scroll_pos, 44), scroll_message, font=font, fill=255)
     
     # Line 6: Fixed Status
     draw.text((0, 55), "STATUS: ONLINE", font=font, fill=255)
 
     
-    # スクロール位置更新 (IP行)
-    scroll_pos -= 2
-    max_len = len(scroll_message) * 6
+    # スクロール位置更新 (IP行) - 速度アップ: -3px/frame
+    scroll_pos -= 3
+    max_len = len(scroll_message) * 7
     if scroll_pos < -max_len:
         scroll_pos = OLED_WIDTH
 
-    # スクロール位置更新 (DEST行)
-    dest_scroll_pos -= 2
-    dest_max_len = len(dest_scroll_message) * 7  # 日本語文字は少し幅広
+    # スクロール位置更新 (DEST行) - 速度アップ: -3px/frame
+    dest_scroll_pos -= 3
+    dest_max_len = len(dest_scroll_message) * 8  # 日本語文字は幅広
     if dest_scroll_pos < -dest_max_len:
         dest_scroll_pos = OLED_WIDTH
         
