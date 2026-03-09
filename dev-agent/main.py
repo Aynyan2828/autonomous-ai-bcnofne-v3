@@ -100,6 +100,62 @@ async def sync_repository():
             "message": f"同期中に致命的な問題が発生したばい：{e}"
         }
 
+@app.post("/update")
+async def update_system(background_tasks: BackgroundTasks):
+    """chown + git pull + restart を一括実行するエンドポイント"""
+    background_tasks.add_task(execute_full_update)
+    return {"status": "queued", "message": "フルアップデートを開始するばい！"}
+
+async def execute_full_update():
+    """chown → git checkout → git pull → watchdog restart の一括実行"""
+    logger.info("Full update started (triggered via LINE)")
+    steps = []
+    
+    try:
+        # 1. git パーミッション修正
+        _fix_git_permissions()
+        res = subprocess.run(["chown", "-R", "1000:1000", SRC_DIR],
+                           capture_output=True, text=True, check=False)
+        steps.append(f"chown: {'OK' if res.returncode == 0 else 'SKIP'}")
+        
+        # 2. ローカル変更を破棄
+        subprocess.run(["git", "config", "--system", "--add", "safe.directory", SRC_DIR], check=False)
+        res = subprocess.run(["git", "-C", SRC_DIR, "checkout", "--", "."],
+                           capture_output=True, text=True, check=False)
+        steps.append(f"git checkout: {'OK' if res.returncode == 0 else res.stderr.strip()[:50]}")
+        
+        # 3. git pull
+        res = subprocess.run(["git", "-C", SRC_DIR, "pull", "origin", "main"],
+                           capture_output=True, text=True, timeout=60, check=False)
+        if res.returncode == 0:
+            steps.append("git pull: OK")
+        else:
+            steps.append(f"git pull: FAIL - {res.stderr.strip()[:80]}")
+            await send_push_notification(f"⚠️ アップデート失敗したばい。\n" + "\n".join(steps))
+            return
+        
+        # 4. パーミッション再修正
+        _fix_git_permissions()
+        
+        # 5. watchdog に再起動を依頼
+        logger.info("Update pull complete. Triggering restart via watchdog...")
+        steps.append("restart: triggered")
+        
+        await send_push_notification(
+            f"✅ アップデート完了したばい！\n" + "\n".join(steps) + "\n\n再起動中やけん、30秒くらい待っとってね！🚢💨"
+        )
+        
+        # watchdog に再起動をリクエスト
+        async with httpx.AsyncClient() as client:
+            try:
+                await client.post("http://watchdog:8005/restart", timeout=5.0)
+            except Exception:
+                pass  # watchdog が再起動するので接続切れは想定内
+    
+    except Exception as e:
+        logger.error(f"Full update error: {e}")
+        await send_push_notification(f"⚠️ アップデート中にエラー: {e}")
+
 @app.post("/apply/{proposal_id}")
 async def apply_proposal(proposal_id: str, background_tasks: BackgroundTasks):
     """

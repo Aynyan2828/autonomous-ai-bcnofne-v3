@@ -606,11 +606,18 @@ async def handle_restart_command(reply_token: str):
     await send_reply(reply_token, "了解！システム全体を再起動（リブート）して、最新の状態にするばい。再起動中はしばらく反応できんくなるけん、ちょっと待っとってね。全速前進！🚢💨")
     try:
         async with httpx.AsyncClient() as client:
-            # watchdog を叩いて再起動をキック
             await client.post("http://watchdog:8005/restart", timeout=5.0)
     except Exception as e:
         logger.error(f"Failed to trigger restart: {e}")
-        # 再起動が失敗した旨は LINE ゲートウェイが生きていれば届く
+
+async def handle_update_command(reply_token: str):
+    """chown + git pull + restart を一括実行する"""
+    await send_reply(reply_token, "了解！フルアップデートを開始するばい！\n\n① パーミッション修正\n② 最新コード取得\n③ 全コンテナ再起動\n\nしばらく反応できんくなるけん、待っとってね！🚢💨")
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post("http://dev-agent:8013/update", timeout=5.0)
+    except Exception as e:
+        logger.error(f"Failed to trigger update: {e}")
 
 # --- Main Message Endpoint ---
 
@@ -667,8 +674,11 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
     elif "今日何した" in text:
         await handle_activity_report(db, payload.reply_token)
         return
-    elif text == "同期" or text == "アップデート":
+    elif text == "同期":
         await handle_sync_command(payload.reply_token)
+        return
+    elif text == "更新" or text == "アップデート" or text == "フルアップデート":
+        await handle_update_command(payload.reply_token)
         return
     elif text == "再起動" or text == "リスタート":
         await handle_restart_command(payload.reply_token)
