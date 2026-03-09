@@ -279,6 +279,10 @@ async def execute_full_update():
     steps = []
     
     try:
+        # 0. 強制中断（コンフリクト解消）
+        subprocess.run(["git", "-C", SRC_DIR, "merge", "--abort"], check=False)
+        subprocess.run(["git", "-C", SRC_DIR, "rebase", "--abort"], check=False)
+
         # 1. git パーミッション修正
         _fix_git_permissions()
         res = subprocess.run(["chown", "-R", "1000:1000", SRC_DIR],
