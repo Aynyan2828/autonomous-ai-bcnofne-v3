@@ -126,13 +126,11 @@ async def execute_apply(proposal_id: str):
         # 2. バックアップ (Git commit)
         try:
             # Dockerコンテナ内での所有権エラーとIdentityエラーの回避
-            # --system を使うことで HOME の依存性を減らす
             subprocess.run(["git", "config", "--system", "--add", "safe.directory", SRC_DIR], check=True)
             subprocess.run(["git", "config", "--system", "user.email", "ayn@shipos.local"], check=True)
             subprocess.run(["git", "config", "--system", "user.name", "AYN"], check=True)
             
             subprocess.run(["git", "-C", SRC_DIR, "add", "."], check=True)
-            # 変更がない場合でも exit 0 にするために commit に --allow-empty を付与
             res = subprocess.run(["git", "-C", SRC_DIR, "commit", "-m", f"pre-apply backup for {proposal_id}", "--allow-empty"], 
                                  capture_output=True, text=True, check=True)
             logger.info(f"Backup commit created successfully: {res.stdout.strip()}")
@@ -140,10 +138,11 @@ async def execute_apply(proposal_id: str):
             logger.warn(f"Backup commit skipped or failed (Git Error 128?): {e.stderr.strip()}")
         except Exception as e:
             logger.warn(f"Backup commit fatal error: {repr(e)}")
+        finally:
+            # ★恒久対策: git 操作後に .git の所有権をホスト側ユーザー (UID 1000 = pi) に戻す
+            _fix_git_permissions()
 
         # 3. 反映実行 (workspace から src へコピー)
-        # 固定の workspace 構造を想定
-        # 簡易化のため、plan_json に含まれるファイルリストを元にコピーする
         plan = json.loads(proposal.get("plan_json", "{}"))
         files = plan.get("files", [])
         
@@ -154,6 +153,11 @@ async def execute_apply(proposal_id: str):
                 logger.info(f"Source file found in workspace: {work_full}")
                 os.makedirs(os.path.dirname(src_full), exist_ok=True)
                 shutil.copy2(work_full, src_full)
+                # コピーしたファイルの所有権もホスト側に合わせる
+                try:
+                    os.chown(src_full, 1000, 1000)
+                except Exception:
+                    pass
                 logger.info(f"Successfully applied change to {f_path}")
             else:
                 logger.error(f"Source file NOT FOUND in workspace: {work_full} (Proposal: {proposal_id})")
@@ -165,14 +169,22 @@ async def execute_apply(proposal_id: str):
         logger.info(f"Apply completed for {proposal_id}. Awaiting service restart...")
         await send_push_notification(f"マスター、改修案 {proposal_id} の整備（適用）が完了したばい！正常に反映されたけん、安心してね。")
         
-        # 5. 自身の再起動は Compose 連携が必要だが、ここではログに残す
-        # 実際には core 等が検知して docker compose restart するか、
-        # サービス自体が終了して Compose が再起動するのを待つ
+        # 最後に全体の権限を修正
+        _fix_git_permissions()
 
     except Exception as e:
         logger.error(f"Apply fatal error for {proposal_id}: {e}")
         async with httpx.AsyncClient() as client:
             await client.patch(f"{MEMORY_SERVICE_URL}/proposals/{proposal_id}", json={"status": "FAILED"})
+        _fix_git_permissions()
+
+def _fix_git_permissions():
+    """git 操作後に .git ディレクトリの所有権をホスト側 (UID 1000 = pi) に戻す恒久対策"""
+    try:
+        subprocess.run(["chown", "-R", "1000:1000", os.path.join(SRC_DIR, ".git")],
+                       capture_output=True, check=False)
+    except Exception as e:
+        print(f"[dev-agent] WARN: chown fix failed (non-critical): {e}")
 
 # --- Autonomous Development Loop ---
 
