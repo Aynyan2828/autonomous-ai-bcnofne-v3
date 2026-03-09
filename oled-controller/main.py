@@ -88,6 +88,8 @@ fan_is_on = False
 oled_display = None
 scroll_message = ""
 scroll_pos = OLED_WIDTH
+dest_scroll_message = ""
+dest_scroll_pos = OLED_WIDTH
 last_touch_ts = time.time()
 
 def get_db():
@@ -301,7 +303,7 @@ def compute_mood(temp: float, ai_status: str, ship_mode: str) -> tuple[int, str]
     return score, face
 
 def update_oled(db: Session):
-    global scroll_pos, scroll_message
+    global scroll_pos, scroll_message, dest_scroll_pos, dest_scroll_message
     if not HARDWARE_AVAILABLE or not oled_display:
         return
 
@@ -342,6 +344,12 @@ def update_oled(db: Session):
         scroll_message = total_scroll
         scroll_pos = OLED_WIDTH
 
+    # DEST scroll message setup (AI goal - full text scroll)
+    goal_raw = get_system_state_val(db, "ai_target_goal", "---")
+    new_dest = clean_text(goal_raw)
+    if new_dest != dest_scroll_message:
+        dest_scroll_message = new_dest
+        dest_scroll_pos = OLED_WIDTH
     
     # Special faces mapping based on score
     if score < 40:
@@ -358,10 +366,13 @@ def update_oled(db: Session):
     draw = ImageDraw.Draw(image)
     
     try:
-        # 日本語表示用のフォントをロード
+        # 日本語表示用のフォントをロード (複数パスを試行)
         jp_font_paths = [
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+            "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         ]
         font = None
         for p in jp_font_paths:
@@ -378,13 +389,13 @@ def update_oled(db: Session):
     # Line 1: BCNOFNe: SAIL >===> [~]
     draw.text((0, 0), clean_text(f"BCNOFNe:{mode_disp} {mode_emoji}"), font=font, fill=255)
     
-    # Line 2: DEST: [Goal]
-    # AI の最新の思考・活動ログを日本語で取得
-    goal = get_system_state_val(db, "ai_target_goal", "---")
-    # 日本語込みで13文字程度に制限（表示幅に合わせて調整が必要かもしれないが、まずはシンプルに）
-    # スクロールさせることも検討できるが、一旦切り詰め
-    goal_disp = clean_text(goal)[:20]
-    draw.text((0, 11), f"DEST:{goal_disp}", font=font, fill=255)
+    # Line 2: DEST: [Goal] (スクロール表示)
+    dest_label = "DEST:"
+    label_w = len(dest_label) * 6  # ラベル部分の幅(概算)
+    # ラベルは固定、内容部分だけスクロール
+    draw.text((0, 11), dest_label, font=font, fill=255)
+    # クリップ領域を設けてスクロール
+    draw.text((dest_scroll_pos, 11), dest_scroll_message, font=font, fill=255)
     
     # Line 3: AI: (face)
     draw.text((0, 22), f"AI: {ai_face}", font=font, fill=255)
@@ -399,12 +410,17 @@ def update_oled(db: Session):
     draw.text((0, 55), "STATUS: ONLINE", font=font, fill=255)
 
     
-    # スクロール位置更新
+    # スクロール位置更新 (IP行)
     scroll_pos -= 2
-    # 文字列の長さ * ピクセル(約6px)
     max_len = len(scroll_message) * 6
     if scroll_pos < -max_len:
         scroll_pos = OLED_WIDTH
+
+    # スクロール位置更新 (DEST行)
+    dest_scroll_pos -= 2
+    dest_max_len = len(dest_scroll_message) * 7  # 日本語文字は少し幅広
+    if dest_scroll_pos < -dest_max_len:
+        dest_scroll_pos = OLED_WIDTH
         
     oled_display.image(image)
     oled_display.show()
