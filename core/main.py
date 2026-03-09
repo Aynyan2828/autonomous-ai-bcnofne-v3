@@ -498,6 +498,7 @@ async def handle_proposal_detail(reply_token: str, prop_id: str):
 
 async def handle_proposal_approve(reply_token: str, prop_id: str):
     """マスターの承認を受けてステータスを変更し、dev-agent に適用を指示"""
+    admin_user_id = os.getenv("LINE_ADMIN_USER_ID", "")
     async with httpx.AsyncClient() as client:
         try:
             r = await client.patch(f"http://memory-service:8003/proposals/{prop_id}", json={"status": "APPROVED"})
@@ -506,6 +507,8 @@ async def handle_proposal_approve(reply_token: str, prop_id: str):
                 try:
                     await client.post(f"http://dev-agent:8013/apply/{prop_id}", timeout=5.0)
                     await send_reply(reply_token, f"了解！改修案 {prop_id} の出航（適用）を許可したばい。整備を開始するけん、ちょっと待っとってね！")
+                    # バックグラウンドで完了を監視して報告する
+                    asyncio.create_task(_monitor_apply_result(prop_id, admin_user_id))
                 except Exception as e:
                     logger.error(f"Failed to notify dev-agent: {e}")
                     await send_reply(reply_token, f"承認は記録したばってん、整備士（dev-agent）に連絡がつかなかったばい。後でもう一度「承認 {prop_id}」って送ってみて！")
@@ -513,6 +516,34 @@ async def handle_proposal_approve(reply_token: str, prop_id: str):
                 await send_reply(reply_token, "承認処理に失敗したばい。")
         except Exception as e:
             await send_reply(reply_token, f"通信エラーばい: {e}")
+
+async def _monitor_apply_result(prop_id: str, admin_user_id: str):
+    """dev-agent の適用結果を監視し、完了/失敗を LINE で報告する"""
+    for i in range(12):  # 最大60秒間（5秒 x 12回）監視
+        await asyncio.sleep(5)
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(f"http://memory-service:8003/proposals/{prop_id}")
+                if r.status_code == 200:
+                    status = r.json().get("status", "")
+                    if status == "APPLIED":
+                        msg = f"🎉 改修案 {prop_id} の整備（適用）が完了したばい！正常に反映されたけん、安心してね。次回の再起動で有効になるばい！"
+                        logger.info(f"Proposal {prop_id} applied successfully.")
+                        if admin_user_id:
+                            await send_push(admin_user_id, msg)
+                        return
+                    elif status == "FAILED":
+                        msg = f"⚠️ 改修案 {prop_id} の適用に失敗したばい。ログを確認してね。"
+                        logger.error(f"Proposal {prop_id} apply failed.")
+                        if admin_user_id:
+                            await send_push(admin_user_id, msg)
+                        return
+        except Exception as e:
+            logger.warn(f"Monitor apply check error: {e}")
+    # タイムアウト
+    logger.warn(f"Apply monitor timed out for {prop_id}")
+    if admin_user_id:
+        await send_push(admin_user_id, f"⏰ 改修案 {prop_id} の適用状態を確認できんかったばい。`/proposals` で確認してみて！")
 
 async def handle_proposal_reject(reply_token: str, prop_id: str):
     """提案を却下"""
