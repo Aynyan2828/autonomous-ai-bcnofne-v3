@@ -270,6 +270,8 @@ def control_fan(temp):
         fan_is_on = False
 
 def get_system_state_val(db: Session, key: str, default: str) -> str:
+    # 別プロセス（core等）が書き込んだ最新の値を読むため、キャッシュを破棄してからクエリ
+    db.expire_all()
     state = db.query(SystemState).filter_by(key=key).first()
     return state.value if state else default
 
@@ -434,7 +436,7 @@ async def hardware_loop():
             temp = get_cpu_temp()
             control_fan(temp)
             update_oled(db)
-            db.commit() # Fresh read next time
+            db.expire_all()  # 別プロセスの書き込みを確実に読む
             await asyncio.sleep(0.1) # 10FPS程度のスクロールを維持
     except Exception as e:
         print(f"Hardware loop error: {e}")
