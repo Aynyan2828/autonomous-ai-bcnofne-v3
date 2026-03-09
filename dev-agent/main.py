@@ -232,23 +232,24 @@ async def sync_repository(_: bool = Depends(verify_internal_token)):
         await send_push_notification(msg)
         return {"status": "error", "message": msg}
     try:
-        # 1. Git pull 実行
-        logger.info("Starting git pull from origin main...")
+        # 1. Git fetch & reset --hard 実行
+        logger.info("Starting git fetch & reset --hard from origin/main...")
+        subprocess.run(["git", "-C", SRC_DIR, "fetch", "origin", "main"], check=True, timeout=30)
         res = subprocess.run(
-            ["git", "-C", SRC_DIR, "pull", "--rebase", "origin", "main"],
+            ["git", "-C", SRC_DIR, "reset", "--hard", "origin/main"],
             capture_output=True, text=True, timeout=30
         )
         
         if res.returncode == 0:
-            logger.info("Git pull completed successfully.")
-            await send_push_notification("マスター、最新の魂（コード）の同期が完了したばい！変更を反映させるには「再起動」って指示してね。")
+            logger.info("Git reset --hard completed successfully.")
+            await send_push_notification("マスター、最新の魂（コード）の強制同期が完了したばい！変更を反映させるには「再起動」って指示してね。")
             return {
                 "status": "success",
                 "message": "魂（コード）の同期が完了したばい！最新の状態になったよ。",
                 "output": res.stdout
             }
         else:
-            logger.error(f"Git pull failed: {res.stderr}")
+            logger.error(f"Git reset failed: {res.stderr}")
             return {
                 "status": "error",
                 "message": f"同期に失敗したばい...。エラーが出とるよ：\n{res.stderr}",
@@ -290,15 +291,20 @@ async def execute_full_update():
                            capture_output=True, text=True, check=False)
         steps.append(f"git checkout: {'OK' if res.returncode == 0 else res.stderr.strip()[:50]}")
         
-        # 3. git pull
-        res = subprocess.run(["git", "-C", SRC_DIR, "pull", "--rebase", "origin", "main"],
+        # 3. git fetch + reset --hard (強制同期)
+        fetch_res = subprocess.run(["git", "-C", SRC_DIR, "fetch", "origin", "main"],
+                                 capture_output=True, text=True, timeout=60, check=False)
+        
+        res = subprocess.run(["git", "-C", SRC_DIR, "reset", "--hard", "origin/main"],
                            capture_output=True, text=True, timeout=60, check=False)
+        
         if res.returncode == 0:
-            steps.append("git pull: OK")
+            steps.append("git reset --hard: OK")
         else:
-            steps.append(f"git pull: FAIL - {res.stderr.strip()[:80]}")
+            # 本当に FAIL の場合のみエラーを出す
+            steps.append(f"git reset: FAIL - {res.stderr.strip()[:80]}")
             await send_push_notification(f"⚠️ アップデート失敗したばい。\n" + "\n".join(steps))
-            return
+            return 
         
         # 4. パーミッション再修正
         _fix_git_permissions()
