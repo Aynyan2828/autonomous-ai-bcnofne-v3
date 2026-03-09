@@ -16,6 +16,8 @@ openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 AI_NAME = os.getenv("AI_NAME", "AYN")
 AI_USER_NAME = os.getenv("AI_USER_NAME", "マスター")
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "aynyan-secret-2828")
+SYSTEM_VERSION = "v3.3.0"
+DEV_AGENT_VERSION = "v3.3.0"
 
 SYSTEM_PROMPT = f"""
 あなたは自律型AIエージェント『{AI_NAME}』です。
@@ -35,6 +37,11 @@ Raspberry Pi上で動作する、元素記号をモチーフとした船のOS『
 【制約】
 - 返答は簡潔かつ有意義なものにしてください。
 - 自分の正体がAIであることを隠す必要はありませんが、人間のように親身に接してください。
+
+【システム情報】
+- システム名称: autonomous AI BCNOFNe system (shipOS)
+- システムバージョン: {SYSTEM_VERSION}
+- 整備士(dev-agent)バージョン: {DEV_AGENT_VERSION}
 """
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -671,6 +678,10 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
     # 情報・確認系コマンド
     if text == "health":
         await handle_health_command(db, payload.reply_token)
+        return
+    elif text == "version" or text == "バージョン":
+        v_msg = f"【shipOS システム情報】\n・システム名称: BCNOFNe system\n・バージョン: {SYSTEM_VERSION}\n・整備士(dev-agent): {DEV_AGENT_VERSION}\n\n今のうちはこのバージョンで絶好調ばい！全速前進！🚢💨"
+        await send_reply(payload.reply_token, v_msg)
         return
     elif text == "status":
         await handle_status_command(db, payload.reply_token)
