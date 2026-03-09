@@ -137,6 +137,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env:ro
+      - /mnt/ssd:/mnt/ssd
+      - /mnt/hdd:/mnt/hdd
       - /sys:/sys:ro
       - ./oled_128x64_resize_dither.png:/app/oled_128x64_resize_dither.png:ro
 

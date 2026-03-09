@@ -407,14 +407,14 @@ def update_oled(db: Session):
     draw.text((0, 55), "STATUS: ONLINE", font=font, fill=255)
 
     
-    # スクロール位置更新 (IP行) - 速度アップ: -3px/frame
-    scroll_pos -= 3
+    # スクロール位置更新 (IP行)
+    scroll_pos -= 5
     max_len = len(scroll_message) * 7
     if scroll_pos < -max_len:
         scroll_pos = OLED_WIDTH
 
-    # スクロール位置更新 (DEST行) - 速度アップ: -3px/frame
-    dest_scroll_pos -= 3
+    # スクロール位置更新 (DEST行)
+    dest_scroll_pos -= 5
     dest_max_len = len(dest_scroll_message) * 8  # 日本語文字は幅広
     if dest_scroll_pos < -dest_max_len:
         dest_scroll_pos = OLED_WIDTH

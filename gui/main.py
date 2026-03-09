@@ -14,167 +14,196 @@ html_template = """
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>shipOS Dashboard - AYN</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>shipOS - AYN</title>
     <style>
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: 'Noto Sans JP', 'Hiragino Sans', 'Meiryo', monospace;
-            background: linear-gradient(135deg, #0b1a2e 0%, #1a0a2e 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans JP', 'Hiragino Sans', sans-serif;
+            background: #0a0e1a;
             color: #e0e0e0;
-            margin: 0;
-            padding: 20px;
-            min-height: 100vh;
+            padding: 12px;
+            -webkit-text-size-adjust: 100%;
         }
         h1 {
-            color: #f0f0f0;
-            border-bottom: 2px solid #4af626;
-            padding-bottom: 10px;
-            font-size: 1.5em;
+            color: #fff;
+            font-size: 1.2em;
+            padding: 8px 0;
+            border-bottom: 1px solid #4af626;
+            margin-bottom: 12px;
         }
-        h2 { color: #4af626; margin-top: 0; font-size: 1.1em; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
-        @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
-        .card {
-            background: rgba(17, 41, 72, 0.8);
-            padding: 15px;
-            border-radius: 10px;
-            border: 1px solid rgba(74, 246, 38, 0.2);
-            backdrop-filter: blur(10px);
-        }
-        .card-full { grid-column: 1 / -1; }
-        .status-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .status-key { color: #00bcd4; font-weight: bold; font-size: 0.85em; }
-        .status-val { color: #fff; font-size: 0.85em; word-break: break-all; max-width: 60%; text-align: right; }
-        .alert { color: #f44336; font-weight: bold; }
-        .warning { color: #ffeb3b; font-weight: bold; }
+        h2 { color: #4af626; font-size: 0.95em; margin-bottom: 8px; }
         
-        /* ログビューア */
+        .card {
+            background: rgba(20, 35, 60, 0.9);
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(74, 246, 38, 0.15);
+            margin-bottom: 10px;
+        }
+        
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            font-size: 0.82em;
+        }
+        .status-key { color: #00bcd4; font-weight: bold; min-width: 100px; }
+        .status-val { color: #fff; text-align: right; word-break: break-all; flex: 1; margin-left: 8px; }
+        .alert { color: #f44336 !important; }
+        .warning { color: #ffeb3b !important; }
+        
+        /* ログビューア - モバイル最適化 */
         .log-container {
-            max-height: 500px;
+            max-height: 60vh;
             overflow-y: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 0.8em;
-            line-height: 1.6;
+            -webkit-overflow-scrolling: touch;
+            font-size: 0.75em;
+            line-height: 1.5;
         }
         .log-entry {
-            padding: 3px 8px;
+            padding: 4px 6px;
             border-bottom: 1px solid rgba(255,255,255,0.03);
         }
-        .log-entry:hover { background: rgba(255,255,255,0.05); }
-        .log-time { color: #888; margin-right: 8px; }
-        .log-service { color: #00bcd4; margin-right: 8px; font-weight: bold; }
+        .log-entry:hover, .log-entry:active { background: rgba(255,255,255,0.05); }
+        .log-head {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .log-time { color: #666; font-size: 0.85em; }
+        .log-svc { color: #00bcd4; font-weight: bold; }
         .log-INFO { color: #4af626; }
         .log-WARN { color: #ffeb3b; }
         .log-ERROR { color: #f44336; }
         .log-CRITICAL { color: #ff1744; font-weight: bold; }
-        .log-msg { color: #e0e0e0; }
+        .log-msg { color: #ccc; display: block; margin-top: 2px; word-break: break-word; }
         
         .filter-bar {
-            display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;
+            display: flex;
+            gap: 5px;
+            margin-bottom: 8px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
         .filter-btn {
-            padding: 4px 12px;
+            padding: 5px 12px;
             border: 1px solid rgba(74, 246, 38, 0.3);
             background: transparent;
             color: #4af626;
-            border-radius: 4px;
+            border-radius: 15px;
             cursor: pointer;
             font-size: 0.8em;
+            white-space: nowrap;
+            -webkit-tap-highlight-color: transparent;
         }
-        .filter-btn:hover, .filter-btn.active {
-            background: rgba(74, 246, 38, 0.2);
+        .filter-btn:active, .filter-btn.active {
+            background: rgba(74, 246, 38, 0.25);
         }
-        .refresh-info { color: #666; font-size: 0.75em; text-align: right; margin-top: 5px; }
+        
+        .refresh-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 6px;
+        }
+        .refresh-info { color: #555; font-size: 0.7em; }
+        .refresh-btn {
+            padding: 4px 10px;
+            border: 1px solid #4af626;
+            background: transparent;
+            color: #4af626;
+            border-radius: 4px;
+            font-size: 0.75em;
+            cursor: pointer;
+        }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <h1>⚓ shipOS DASHBOARD — AYN</h1>
+    <h1>⚓ shipOS — AYN</h1>
     
-    <div class="grid">
-        <div class="card">
-            <h2>🚢 System Status</h2>
-            {% for item in system_states %}
-            <div class="status-row">
-                <span class="status-key">{{ item.key }}</span>
-                <span class="status-val">{{ item.value }}</span>
+    <!-- システム状態 -->
+    <div class="card">
+        <h2>🚢 Status</h2>
+        {% for item in system_states %}
+        <div class="status-row">
+            <span class="status-key">{{ item.key }}</span>
+            <span class="status-val">{{ item.value }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    
+    <!-- 課金状態 -->
+    <div class="card">
+        <h2>💰 Billing</h2>
+        <div class="status-row">
+            <span class="status-key">Cost</span>
+            <span class="status-val">{{ billing_data.current_cost_jpy }} 円</span>
+        </div>
+        <div class="status-row">
+            <span class="status-key">Alert</span>
+            <span class="status-val {% if billing_data.alert_level == 'STOP' %}alert{% elif billing_data.alert_level in ['ALERT', 'WARNING'] %}warning{% endif %}">
+                {{ billing_data.alert_level }}
+            </span>
+        </div>
+    </div>
+    
+    <!-- ログ -->
+    <div class="card">
+        <h2>📋 ログ</h2>
+        <div class="filter-bar">
+            <button class="filter-btn active" onclick="filterLogs('ALL',this)">ALL</button>
+            <button class="filter-btn" onclick="filterLogs('INFO',this)">INFO</button>
+            <button class="filter-btn" onclick="filterLogs('WARN',this)">WARN</button>
+            <button class="filter-btn" onclick="filterLogs('ERROR',this)">ERROR</button>
+            <button class="filter-btn" onclick="filterLogs('CRITICAL',this)">CRIT</button>
+        </div>
+        <div class="log-container" id="log-container">
+            {% for log in logs %}
+            <div class="log-entry" data-level="{{ log.level }}">
+                <div class="log-head">
+                    <span class="log-time">{{ log.time }}</span>
+                    <span class="log-svc">{{ log.service }}</span>
+                    <span class="log-{{ log.level }}">{{ log.level }}</span>
+                </div>
+                <span class="log-msg">{{ log.message }}</span>
             </div>
             {% endfor %}
+            {% if not logs %}
+            <div class="log-entry"><span class="log-msg">ログがまだないよ。</span></div>
+            {% endif %}
         </div>
-        
-        <div class="card">
-            <h2>💰 Billing Status</h2>
-            <div class="status-row">
-                <span class="status-key">Mode</span>
-                <span class="status-val">{{ billing_data.is_special_day and "Special Day" or "Normal Day" }}</span>
-            </div>
-            <div class="status-row">
-                <span class="status-key">Cost (JPY)</span>
-                <span class="status-val">{{ billing_data.current_cost_jpy }} 円</span>
-            </div>
-            <div class="status-row">
-                <span class="status-key">Alert Level</span>
-                <span class="status-val {% if billing_data.alert_level == 'STOP' %}alert{% elif billing_data.alert_level in ['ALERT', 'WARNING'] %}warning{% endif %}">
-                    {{ billing_data.alert_level }}
-                </span>
-            </div>
-        </div>
-        
-        <div class="card card-full">
-            <h2>📋 システムログ（最新100件）</h2>
-            <div class="filter-bar">
-                <button class="filter-btn active" onclick="filterLogs('ALL')">ALL</button>
-                <button class="filter-btn" onclick="filterLogs('INFO')">INFO</button>
-                <button class="filter-btn" onclick="filterLogs('WARN')">WARN</button>
-                <button class="filter-btn" onclick="filterLogs('ERROR')">ERROR</button>
-                <button class="filter-btn" onclick="filterLogs('CRITICAL')">CRITICAL</button>
-            </div>
-            <div class="log-container" id="log-container">
-                {% for log in logs %}
-                <div class="log-entry" data-level="{{ log.level }}">
-                    <span class="log-time">{{ log.time }}</span>
-                    <span class="log-service">[{{ log.service }}]</span>
-                    <span class="log-{{ log.level }}">{{ log.level }}</span>
-                    <span class="log-msg">{{ log.message }}</span>
-                </div>
-                {% endfor %}
-                {% if not logs %}
-                <div class="log-entry"><span class="log-msg">ログがまだないよ。</span></div>
-                {% endif %}
-            </div>
-            <div class="refresh-info">30秒ごとに自動更新</div>
+        <div class="refresh-bar">
+            <span class="refresh-info">30秒で自動更新</span>
+            <button class="refresh-btn" onclick="location.reload()">↻ 更新</button>
         </div>
     </div>
     
     <script>
-        // ログフィルタリング
-        function filterLogs(level) {
+        function filterLogs(level, btn) {
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            event.target.classList.add('active');
-            document.querySelectorAll('.log-entry').forEach(entry => {
-                if (level === 'ALL' || entry.dataset.level === level) {
-                    entry.style.display = '';
-                } else {
-                    entry.style.display = 'none';
-                }
+            btn.classList.add('active');
+            document.querySelectorAll('.log-entry').forEach(e => {
+                e.style.display = (level === 'ALL' || e.dataset.level === level) ? '' : 'none';
             });
         }
-        // 30秒ごとに自動更新
-        setTimeout(function(){ window.location.reload(); }, 30000);
+        setTimeout(() => location.reload(), 30000);
     </script>
 </body>
 </html>
 """
 
 import tempfile
-import jinja2
+from jinja2 import Environment, FileSystemLoader
 
 template_dir = tempfile.mkdtemp()
 with open(os.path.join(template_dir, "index.html"), "w", encoding="utf-8") as f:
     f.write(html_template)
 
-from jinja2 import Environment, FileSystemLoader
 env = Environment(loader=FileSystemLoader(template_dir))
 template = env.get_template("index.html")
 
@@ -184,28 +213,22 @@ def health_check():
 
 @app.get("/", response_class=HTMLResponse)
 async def read_dashboard(request: Request):
-    """
-    Core と Billing-Guard から情報を引っ張ってきて結合し、画面に表示する
-    """
     system_states = []
     billing_data = {"is_special_day": False, "current_cost_jpy": 0.0, "alert_level": "UNKNOWN"}
     logs = []
 
-    # DB からシステム状態とログを取得
     try:
         from shared.database import SessionLocal
         from shared.models import SystemState, SystemLog
         db = SessionLocal()
         
-        # System states
         states = db.query(SystemState).all()
         system_states = [{"key": s.key, "value": s.value} for s in states]
         
-        # System logs (最新100件、新しい順)
         log_entries = db.query(SystemLog).order_by(SystemLog.created_at.desc()).limit(100).all()
         for entry in log_entries:
             created = entry.created_at
-            time_str = created.strftime("%m/%d %H:%M:%S") if created else "??"
+            time_str = created.strftime("%m/%d %H:%M") if created else "??"
             logs.append({
                 "time": time_str,
                 "service": entry.service_name or "??",
@@ -219,7 +242,6 @@ async def read_dashboard(request: Request):
         import traceback
         traceback.print_exc()
 
-    # Billing data
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get("http://billing-guard:8002/status", timeout=2.0)
