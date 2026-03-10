@@ -63,7 +63,8 @@ async def send_reply(reply_token: str, text: str):
         try:
             await client.post(
                 "http://line-gateway:8001/api/v1/reply",
-                params={"reply_token": reply_token, "text": text}
+                params={"reply_token": reply_token, "text": text},
+                headers={"X-Internal-Token": INTERNAL_TOKEN}
             )
         except Exception as e:
             print(f"Reply error: {e}")
@@ -73,7 +74,8 @@ async def send_push(user_id: str, text: str):
         try:
             await client.post(
                 "http://line-gateway:8001/api/v1/push",
-                json={"user_id": user_id, "text": text}
+                json={"user_id": user_id, "text": text},
+                headers={"X-Internal-Token": INTERNAL_TOKEN}
             )
         except Exception as e:
             print(f"Push error: {e}")
