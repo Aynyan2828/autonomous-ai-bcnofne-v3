@@ -300,13 +300,19 @@ async def lifespan(app: FastAPI):
                                    f"ステータス: ✅ 正常起動")
                     
                     start_date_str = bill.get("start_date", "不明")
+                    days_running = bill.get("days_running", 0)
+                    is_special_day = "はい" if bill.get("is_special_day", False) else "いいえ"
                     current_cost = bill.get("current_cost_jpy", 0.0)
                     total_cost = bill.get("total_cost_jpy", 0.0)
+                    stop_threshold = bill.get("stop_threshold", 300)
                     
-                    billing_msg = (f"# 課金サマリー\n\n"
+                    billing_msg = (f"## 基本情報\n"
                                    f"- 開始日: {start_date_str}\n"
+                                   f"- 経過日数: {days_running}日目\n"
+                                   f"- 特別日: {is_special_day}\n\n"
                                    f"## 今日のコスト\n"
                                    f"- 使用額: ¥{current_cost:.2f}\n"
+                                   f"- 停止閾値: ¥{stop_threshold}\n\n"
                                    f"## 累計\n"
                                    f"- 総コスト: ¥{total_cost:.2f}")
 

@@ -62,6 +62,10 @@ def _get_todays_cost(db: Session) -> float:
         return 0.0
     return float(_get_state(db, "billing_cost_jpy", "0.0"))
 
+def _get_total_cost(db: Session) -> float:
+    """DB から累積の総コストを取得"""
+    return float(_get_state(db, "billing_total_cost_jpy", "0.0"))
+
 def _get_request_count(db: Session) -> int:
     stored_date = _get_state(db, "billing_date", "")
     today = _today_str()
@@ -178,6 +182,7 @@ def get_billing_status(db: Session = Depends(get_db)):
     special_day = is_special_day(days_running)
     current_cost_jpy = _get_todays_cost(db)
     request_count = _get_request_count(db)
+    total_cost_jpy = _get_total_cost(db)
     
     if special_day:
         warning_threshold, alert_threshold, stop_threshold = 500, 900, 1000
@@ -189,6 +194,7 @@ def get_billing_status(db: Session = Depends(get_db)):
     return {
         "status": "ok",
         "current_cost_jpy": round(current_cost_jpy, 2),
+        "total_cost_jpy": round(total_cost_jpy, 2),
         "request_count": request_count,
         "days_running": days_running,
         "start_date": install_date_str,
@@ -220,15 +226,20 @@ def record_usage(model: str = "gpt-4o-mini", input_tokens: int = 500, output_tok
     new_cost = current_cost + cost_jpy
     new_requests = current_requests + 1
     
+    current_total = _get_total_cost(db)
+    new_total = current_total + cost_jpy
+    
     _set_state(db, "billing_cost_jpy", str(round(new_cost, 4)))
     _set_state(db, "billing_requests", str(new_requests))
+    _set_state(db, "billing_total_cost_jpy", str(round(new_total, 4)))
     
-    logger.info(f"Recorded: {model} in={input_tokens} out={output_tokens} +{cost_jpy:.4f}円 (total: {new_cost:.2f}円, #{new_requests})")
+    logger.info(f"Recorded: {model} in={input_tokens} out={output_tokens} +{cost_jpy:.4f}円 (today: {new_cost:.2f}円, total: {new_total:.2f}円, #{new_requests})")
     
     return {
         "status": "recorded",
         "added_cost_jpy": round(cost_jpy, 4),
         "current_cost_jpy": round(new_cost, 2),
+        "total_cost_jpy": round(new_total, 2),
         "request_count": new_requests
     }
 

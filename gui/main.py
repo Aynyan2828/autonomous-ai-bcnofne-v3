@@ -156,6 +156,12 @@ html_template = """
         .prop-desc { margin-bottom: 8px; color: #e0e0e0; line-height: 1.4; }
         .prop-reason { margin-bottom: 8px; color: #00bcd4; }
         
+        .action-btn { padding: 6px 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.9em; flex: 1; }
+        .apply-btn { background: #4af626; color: #000; }
+        .apply-btn:hover { background: #3dd320; }
+        .reject-btn { background: #f44336; color: #fff; }
+        .reject-btn:hover { background: #d32f2f; }
+        
         /* Diff 表示スタイル */
         .diff-container { margin-top: 8px; }
         .diff-header { font-weight: bold; margin-bottom: 4px; color: #fff; display: flex; justify-content: space-between; align-items: center; }
@@ -181,6 +187,9 @@ html_template = """
             padding: 12px; background: #0a0e1a; border-bottom: 1px solid #00bcd4; display: flex; justify-content: space-between; align-items: center;
         }
         .modal-title { color: #00bcd4; font-size: 1.1em; font-weight: bold; word-break: break-all; }
+        .modal-actions { display: flex; gap: 8px; }
+        .copy-btn { color: #fff; background: #2196F3; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .copy-btn:hover { background: #1976D2; }
         .close-btn { color: #fff; background: transparent; border: 1px solid #555; padding: 4px 12px; border-radius: 4px; cursor: pointer; }
         #fullCodeView {
             flex: 1; padding: 12px; overflow-y: auto; overflow-x: auto; background: #0d111b; color: #a5d6ff; font-family: monospace; font-size: 0.85em; white-space: pre-wrap;
@@ -246,6 +255,13 @@ html_template = """
                     <div class="diff-block formatted-diff"></div>
                 </div>
                 {% endif %}
+                
+                {% if prop.status == 'PENDING' %}
+                <div class="proposal-actions" style="margin-top: 12px; display: flex; gap: 10px;">
+                    <button class="action-btn apply-btn" onclick="applyProposal('{{ prop.id }}')">✅ 適用する (Apply)</button>
+                    <button class="action-btn reject-btn" onclick="rejectProposal('{{ prop.id }}')">❌ 却下する (Reject)</button>
+                </div>
+                {% endif %}
             </div>
         </details>
         {% endfor %}
@@ -290,7 +306,10 @@ html_template = """
         <div class="modal-content">
             <div class="modal-header">
                 <span class="modal-title" id="modalTitle">Loading...</span>
-                <button class="close-btn" onclick="closeModal()">閉じる</button>
+                <div class="modal-actions">
+                    <button class="copy-btn" id="copyBtn" onclick="copyFullCode()">📋 コピー</button>
+                    <button class="close-btn" onclick="closeModal()">閉じる</button>
+                </div>
             </div>
             <div id="fullCodeView">コードを読み込み中...</div>
         </div>
@@ -335,6 +354,7 @@ html_template = """
             
             document.getElementById('modalTitle').textContent = file;
             document.getElementById('fullCodeView').textContent = '読み込み中ばい...少し待ってね！🚢';
+            document.getElementById('copyBtn').textContent = '📋 コピー';
             document.getElementById('codeModal').style.display = 'flex';
             
             fetch('/api/workspace-file?path=' + encodeURIComponent(file))
@@ -352,6 +372,41 @@ html_template = """
         }
         function closeModal() {
             document.getElementById('codeModal').style.display = 'none';
+        }
+        
+        // 追加: 承認・却下のアクション処理
+        function applyProposal(id) {
+            if(!confirm("この改修案を本番環境（/src）に適用するばい！よかですか？")) return;
+            fetch('/api/proposals/' + id + '/apply', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    alert(data.message || '適用処理を開始したばい！再起動まで少し待ってね。');
+                    location.reload();
+                })
+                .catch(e => alert("エラー発生: " + e));
+        }
+
+        function rejectProposal(id) {
+            if(!confirm("お蔵入り（却下）にするばい！本当に破棄してよか？")) return;
+            fetch('/api/proposals/' + id + '/reject', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    alert(data.message || '却下処理が完了したばい！');
+                    location.reload();
+                })
+                .catch(e => alert("エラー発生: " + e));
+        }
+        
+        // 全文コピー
+        function copyFullCode() {
+            const code = document.getElementById('fullCodeView').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                const btn = document.getElementById('copyBtn');
+                btn.textContent = '✅ コピー完了';
+                setTimeout(() => { btn.textContent = '📋 コピー'; }, 2000);
+            }).catch(err => {
+                alert('コピーに失敗しましたばい: ' + err);
+            });
         }
         
         // 初期化
@@ -456,3 +511,38 @@ async def get_workspace_file(path: str):
             return {"content": content}
     except Exception as e:
         return {"error": f"ファイルの読み込みに失敗したばい：{str(e)}"}
+
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "aynyan-secret-2828")
+
+@app.post("/api/proposals/{proposal_id}/apply")
+async def apply_proposal_api(proposal_id: str):
+    """(Security Note: INTERNAL_TOKENを使ってdev-agentを叩く)"""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"http://dev-agent:8013/apply/{proposal_id}",
+                headers={"X-Internal-Token": INTERNAL_TOKEN},
+                timeout=10.0
+            )
+            if resp.status_code == 200:
+                return {"status": "success", "message": f"{proposal_id} の適用を開始したばい！再起動ば待っとってね！"}
+            else:
+                return {"status": "error", "message": f"適用に失敗したかも... ステータスコード: {resp.status_code}"}
+    except Exception as e:
+        return {"status": "error", "message": f"通信エラーが発生したばい：{e}"}
+
+@app.post("/api/proposals/{proposal_id}/reject")
+async def reject_proposal_api(proposal_id: str):
+    """(Security Note: DB(memory-service)を直接更新してREJECTにする)"""
+    try:
+        async with httpx.AsyncClient() as client:
+            p_resp = await client.get(f"http://memory-service:8003/proposals/{proposal_id}")
+            if p_resp.status_code == 200:
+                p_data = p_resp.json()
+                p_data["status"] = "REJECTED"
+                u_resp = await client.put(f"http://memory-service:8003/proposals/{proposal_id}", json=p_data)
+                if u_resp.status_code == 200:
+                    return {"status": "success", "message": f"{proposal_id} の改修案を破棄したばい。"}
+            return {"status": "error", "message": "破棄データの更新に失敗したばい...。"}
+    except Exception as e:
+        return {"status": "error", "message": f"通信エラーが発生したばい：{e}"}
