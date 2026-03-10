@@ -121,7 +121,7 @@ html_template = """
             cursor: pointer;
         }
 
-        /* 提案ビュー */
+        /* 提案ビュー & リッチDiff */
         .proposal-details {
             border: 1px solid rgba(74, 246, 38, 0.2);
             border-radius: 4px;
@@ -141,12 +141,7 @@ html_template = """
         .proposal-summary::-webkit-details-marker { display: none; }
         
         .prop-id { color: #00bcd4; font-family: monospace; }
-        .prop-status {
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-size: 0.8em;
-            font-weight: bold;
-        }
+        .prop-status { padding: 2px 6px; border-radius: 10px; font-size: 0.8em; font-weight: bold; }
         .status-PENDING { background: #ffeb3b; color: #000; }
         .status-APPROVED, .status-APPLIED { background: #4af626; color: #000; }
         .status-REJECTED, .status-FAILED { background: #f44336; color: #fff; }
@@ -160,16 +155,35 @@ html_template = """
         }
         .prop-desc { margin-bottom: 8px; color: #e0e0e0; line-height: 1.4; }
         .prop-reason { margin-bottom: 8px; color: #00bcd4; }
-        .prop-code {
-            background: #000;
-            padding: 8px;
-            border-radius: 4px;
-            overflow-x: auto;
-            color: #a5d6ff;
-            font-family: monospace;
-            font-size: 0.9em;
-            margin-top: 4px;
-            border: 1px solid rgba(255,255,255,0.1);
+        
+        /* Diff 表示スタイル */
+        .diff-container { margin-top: 8px; }
+        .diff-header { font-weight: bold; margin-bottom: 4px; color: #fff; display: flex; justify-content: space-between; align-items: center; }
+        .full-code-btn { 
+            background: #00bcd4; color: #000; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.9em; font-weight: bold; 
+        }
+        .diff-block {
+            background: #111; padding: 8px; border-radius: 4px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.3;
+        }
+        .diff-line.add { color: #4af626; text-decoration: underline; background: rgba(74, 246, 38, 0.1); display: block; }
+        .diff-line.del { color: #f44336; text-decoration: line-through; background: rgba(244, 67, 54, 0.1); display: block; }
+        .diff-line.info { color: #00bcd4; opacity: 0.8; display: block; }
+        
+        /* 全文表示モーダル */
+        #codeModal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85); z-index: 1000; align-items: center; justify-content: center;
+        }
+        .modal-content {
+            background: #1a1e29; width: 95%; height: 90%; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #00bcd4;
+        }
+        .modal-header {
+            padding: 12px; background: #0a0e1a; border-bottom: 1px solid #00bcd4; display: flex; justify-content: space-between; align-items: center;
+        }
+        .modal-title { color: #00bcd4; font-size: 1.1em; font-weight: bold; word-break: break-all; }
+        .close-btn { color: #fff; background: transparent; border: 1px solid #555; padding: 4px 12px; border-radius: 4px; cursor: pointer; }
+        #fullCodeView {
+            flex: 1; padding: 12px; overflow-y: auto; overflow-x: auto; background: #0d111b; color: #a5d6ff; font-family: monospace; font-size: 0.85em; white-space: pre-wrap;
         }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
@@ -223,8 +237,14 @@ html_template = """
                 <p class="prop-reason"><strong>選定理由:</strong> {{ prop.reason }}</p>
                 {% endif %}
                 {% if prop.diff %}
-                <strong>生成コード差分:</strong>
-                <pre class="prop-code"><code>{{ prop.diff }}</code></pre>
+                <div class="diff-container">
+                    <div class="diff-header">
+                        <span>生成コード差分 (Diff)</span>
+                        <button class="full-code-btn" onclick="openFullCode('{{ prop.files_affected }}')">📄 全文を見る</button>
+                    </div>
+                    <div class="diff-block raw-diff" style="display:none;">{{ prop.diff }}</div>
+                    <div class="diff-block formatted-diff"></div>
+                </div>
                 {% endif %}
             </div>
         </details>
@@ -265,6 +285,17 @@ html_template = """
         </div>
     </div>
     
+    <!-- ファイル全文表示モーダル -->
+    <div id="codeModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title" id="modalTitle">Loading...</span>
+                <button class="close-btn" onclick="closeModal()">閉じる</button>
+            </div>
+            <div id="fullCodeView">コードを読み込み中...</div>
+        </div>
+    </div>
+    
     <script>
         function filterLogs(level, btn) {
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -273,7 +304,59 @@ html_template = """
                 e.style.display = (level === 'ALL' || e.dataset.level === level) ? '' : 'none';
             });
         }
-        setTimeout(() => location.reload(), 30000);
+        
+        // 差分のリッチ表示（ハイライト処理）
+        function parseDiffs() {
+            document.querySelectorAll('.diff-container').forEach(container => {
+                const rawDiff = container.querySelector('.raw-diff').textContent;
+                const lines = rawDiff.split('\\n');
+                let html = '';
+                lines.forEach(line => {
+                    const esc = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    if (line.startsWith('+') && !line.startsWith('+++')) {
+                        html += `<span class="diff-line add">${esc}</span>`;
+                    } else if (line.startsWith('-') && !line.startsWith('---')) {
+                        html += `<span class="diff-line del">${esc}</span>`;
+                    } else if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) {
+                        html += `<span class="diff-line info">${esc}</span>`;
+                    } else {
+                        html += `<span class="diff-line">${esc}</span>`;
+                    }
+                });
+                container.querySelector('.formatted-diff').innerHTML = html;
+            });
+        }
+        
+        // 全文表示モーダル
+        function openFullCode(filename) {
+            // カンマ区切りの場合は最初のファイルを開く
+            const file = filename.split(',')[0].trim();
+            if(!file) { alert("ファイル名が不明です。"); return; }
+            
+            document.getElementById('modalTitle').textContent = file;
+            document.getElementById('fullCodeView').textContent = '読み込み中ばい...少し待ってね！🚢';
+            document.getElementById('codeModal').style.display = 'flex';
+            
+            fetch('/api/workspace-file?path=' + encodeURIComponent(file))
+                .then(r => r.json())
+                .then(data => {
+                    if(data.error) {
+                        document.getElementById('fullCodeView').textContent = 'エラー: ' + data.error;
+                    } else {
+                        document.getElementById('fullCodeView').textContent = data.content;
+                    }
+                })
+                .catch(e => {
+                    document.getElementById('fullCodeView').textContent = '通信エラーが発生したばい。';
+                });
+        }
+        function closeModal() {
+            document.getElementById('codeModal').style.display = 'none';
+        }
+        
+        // 初期化
+        parseDiffs();
+        setTimeout(() => { if(document.getElementById('codeModal').style.display === 'none') location.reload(); }, 30000);
     </script>
 </body>
 </html>
@@ -327,7 +410,8 @@ async def read_dashboard(request: Request):
                 "title": p.title,
                 "description": p.description,
                 "reason": p.target_selection_reason,
-                "diff": p.diff_content
+                "diff": p.diff_content,
+                "files_affected": p.files_affected or ""
             })
         
         db.close()
@@ -352,3 +436,23 @@ async def read_dashboard(request: Request):
         proposals=proposals
     )
     return HTMLResponse(content=rendered)
+
+@app.get("/api/workspace-file")
+async def get_workspace_file(path: str):
+    """(Security Note: workspace のみ参照可能に制限する)"""
+    import os
+    base_dir = os.path.abspath("/app/workspace")
+    target_path = os.path.abspath(os.path.join(base_dir, path))
+    
+    if not target_path.startswith(base_dir):
+        return {"error": "不正なファイルパスへのアクセスばい！"}
+    
+    if not os.path.exists(target_path):
+        return {"error": "まだファイルが作成されてないか、見つからんやったよ！"}
+        
+    try:
+        with open(target_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            return {"content": content}
+    except Exception as e:
+        return {"error": f"ファイルの読み込みに失敗したばい：{str(e)}"}
