@@ -57,22 +57,6 @@ logger = ShipLogger("core")
 # アプリ起動時にデータベースを初期化（Phase 1用）
 init_db()
 
-app = FastAPI(title="BCNOFNe Core", lifespan=lifespan)
-
-
-class MessagePayload(BaseModel):
-    text: str
-    user_id: str
-    reply_token: str
-    source: str
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 # --- Helpers ---
 async def send_reply(reply_token: str, text: str):
     async with httpx.AsyncClient() as client:
@@ -105,6 +89,19 @@ def set_system_state(db: Session, key: str, value: str):
     else:
         db.add(SystemState(key=key, value=value))
     db.commit()
+
+async def report_usage(response, model: str = "gpt-4o-mini"):
+    """OpenAI 呼び出し後に billing-guard に使用量を報告する"""
+    try:
+        usage = getattr(response, "usage", None)
+        input_tokens = usage.prompt_tokens if usage else 500
+        output_tokens = usage.completion_tokens if usage else 500
+        async with httpx.AsyncClient() as client:
+            await client.post("http://billing-guard:8002/record",
+                            params={"model": model, "input_tokens": input_tokens, "output_tokens": output_tokens},
+                            timeout=2.0)
+    except Exception:
+        pass
 
 async def get_brain_context() -> str:
     """memory-service から現在の多層メモリの要約を取得する"""
@@ -252,14 +249,11 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(register_version_memory_on_startup())
     
     # 2. IP Address Discovery
-    # Docker Bridge モードではコンテナ内から LAN/TS IP は見えない
-    # → start.sh が .env に書いた環境変数を最優先で使う
     db = SessionLocal()
     try:
         host_ip = os.getenv("HOST_IP", "").strip()
         ts_ip = os.getenv("TAILSCALE_IP", "").strip()
         
-        # 環境変数が空 or NOT_FOUND の場合だけ psutil でフォールバック
         if not host_ip or host_ip == "NOT_FOUND":
             for interface, addrs in psutil.net_if_addrs().items():
                 for addr in addrs:
@@ -289,46 +283,32 @@ async def lifespan(app: FastAPI):
 
     # 3. Fetch billing summary and notify
     admin_id = os.getenv("LINE_ADMIN_USER_ID", "")
-    max_startup_attempts = 15 # より粘り強く (合計約2分強待機)
+    max_startup_attempts = 15
     for attempt in range(max_startup_attempts):
         try:
             async with httpx.AsyncClient() as client:
-                # billing-guard への接続確認
                 resp = await client.get("http://billing-guard:8002/status", timeout=5.0)
                 if resp.status_code == 200:
                     bill = resp.json()
                     now_str = datetime.now(timezone.utc).astimezone().strftime("%Y年%m月%d日 %H:%M:%S")
                     
-                    # ネットワーク（外部接続）の疎通確認を兼ねてプロンプトを生成
                     startup_msg = (f"🚀 システム起動\n\n"
                                    f"自律AIエージェントAYNが起動しました\n\n"
                                    f"起動時刻: {now_str}\n"
                                    f"ステータス: ✅ 正常起動")
                     
                     start_date_str = bill.get("start_date", "不明")
-                    # ... (中略: billing_msg 生成ロジックは継続)
-                    days_running = bill.get("days_running", 0)
-                    is_special = "はい" if bill.get("is_special_day") else "いいえ"
                     current_cost = bill.get("current_cost_jpy", 0.0)
-                    warning_th = bill.get("warning_threshold", 0)
-                    alert_th = bill.get("alert_threshold", 0)
-                    stop_th = bill.get("stop_threshold", 0)
                     total_cost = bill.get("total_cost_jpy", 0.0)
-                    total_requests = bill.get("total_requests", 0)
                     
                     billing_msg = (f"# 課金サマリー\n\n"
-                                   f"## 基本情報\n"
                                    f"- 開始日: {start_date_str}\n"
-                                   f"- 経過日数: {days_running}日目\n"
-                                   f"- 特別日: {is_special}\n\n"
                                    f"## 今日のコスト\n"
                                    f"- 使用額: ¥{current_cost:.2f}\n"
-                                   f"- 停止閾値: ¥{stop_th}\n\n"
                                    f"## 累計\n"
                                    f"- 総コスト: ¥{total_cost:.2f}")
 
                     if admin_id:
-                        # 確実に届けるために少し長めに待つ
                         await asyncio.sleep(5) 
                         await send_push(admin_id, startup_msg)
                         await asyncio.sleep(2)
@@ -336,17 +316,11 @@ async def lifespan(app: FastAPI):
                     
                     logger.info(f"Startup notification sent on attempt {attempt + 1}")
                     break 
-                else:
-                    logger.warn(f"Billing-guard returned {resp.status_code} on attempt {attempt + 1}")
-        except Exception as e:
-            logger.info(f"Startup check attempt {attempt + 1}/{max_startup_attempts} failed: {e}")
-            # 徐々に待機時間を延ばす (Exponential Backoff的な)
-            wait_time = min(5.0 + attempt * 2, 20.0)
-            await asyncio.sleep(wait_time)
-            if attempt == max_startup_attempts - 1:
-                logger.error("Startup notification failed after all attempts.")
+        except Exception:
+            pass
+        await asyncio.sleep(10)
 
-    # 3. Startup Voice Announcement
+    # 4. Startup Voice Announcement
     try:
         async with httpx.AsyncClient() as client:
             await client.post("http://voice-router:8007/speak", 
@@ -355,38 +329,43 @@ async def lifespan(app: FastAPI):
         pass
 
     yield
-
     # --- Shutdown Sequence ---
     logger.info("====================================")
     logger.info(" BCNOFNe v3 Stopping (Returning)    ")
     logger.info("====================================")
-    
-    # 1. Stop thinking loop
     thinking_task.cancel()
     
-    # 2. Final notification
-    now_str = datetime.now(timezone.utc).astimezone().strftime("%Y年%m月%d日 %H:%M:%S")
     closing_msg = (f"💤 システム停止\n\n"
                    f"自律AIエージェントAYNを停止します\n\n"
-                   f"停止時刻: {now_str}\n"
                    f"ステータス: ✅ 正常停止")
     if admin_id:
         try:
             await send_push(admin_id, closing_msg)
         except:
             pass
-    logger.warn("System Shutdown Initiated.")
-
-    # 3. Shutdown Voice
+            
     try:
         async with httpx.AsyncClient() as client:
             await client.post("http://voice-router:8007/speak", 
                              json={"text": "本日の航海、終了。お疲れ様でした、マスター。"})
-            await asyncio.sleep(2) # 再生待ち
+            await asyncio.sleep(2)
     except:
         pass
 
-app.router.lifespan_context = lifespan
+app = FastAPI(title="BCNOFNe Core", lifespan=lifespan)
+
+class MessagePayload(BaseModel):
+    text: str
+    user_id: str
+    reply_token: str
+    source: str
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 # --- Command Handlers ---
 
@@ -394,7 +373,6 @@ async def handle_health_command(db: Session, reply_token: str):
     cpu = psutil.cpu_percent(interval=0.1)
     mem = psutil.virtual_memory().percent
     try:
-        # Raspberry Pi temperature
         with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
             temp = int(f.read()) / 1000.0
             temp_str = f"{temp:.1f}C"
@@ -405,9 +383,9 @@ async def handle_health_command(db: Session, reply_token: str):
     try:
         ssd_path = os.getenv("SSD_MOUNT_PATH", "/mnt/ssd")
         if not os.path.exists(ssd_path):
-            ssd_path = "/app/data" # Fallback to standard volume mount
+            ssd_path = "/app/data"
         if not os.path.exists(ssd_path):
-            ssd_path = "/" # Fallback to root
+            ssd_path = "/"
         ssd_usage = psutil.disk_usage(ssd_path).percent
         disk_ssd = f"{ssd_usage}%"
     except:
@@ -448,12 +426,8 @@ async def handle_diary_command(reply_token: str):
             await send_reply(reply_token, f"日誌サービスと通信できんやった: {e}")
 
 async def handle_activity_report(db: Session, reply_token: str):
-    """今日のシステムログを取得し、OpenAI で要約して回答する"""
     try:
-        # 今日の日付（JST想定だがシンプルにDBのcreated_atをJST化または当日分でフィルタ）
-        # 簡単のため、直近 50 件のログを取得
         logs = db.query(SystemLog).order_by(SystemLog.created_at.desc()).limit(50).all()
-        
         if not logs:
             await send_reply(reply_token, "今日はまだ静かな航海が続いてるみたいたい。特に目立った活動はなかよ。")
             return
@@ -462,13 +436,10 @@ async def handle_activity_report(db: Session, reply_token: str):
         log_summary_input = "\n".join(log_texts)
 
         prompt = f"""
-あなたは AYN です。以下のシステムログ（直近の活動）を読み取り、マスターから「今日何した？」と聞かれたことに対して、博多弁で可愛らしく、かつ有意義に要約して答えてください。
-ログにエラーがあれば「少し大変やったけど直したばい」のように前向きに伝えてください。
-
+あなたは AYN です。以下のシステムログを読み取り、マスターから「今日何した？」と聞かれたことに対して、博多弁で要約して答えてください。
 【システムログ】
 {log_summary_input}
 """
-
         response = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -480,7 +451,6 @@ async def handle_activity_report(db: Session, reply_token: str):
         report = response.choices[0].message.content.strip()
         await report_usage(response)
         await send_reply(reply_token, report)
-
     except Exception as e:
         logger.error(f"Activity report error: {e}")
         await send_reply(reply_token, "ごめん、今日の記録を読み取るのがちょっと難しかみたい…")
@@ -489,10 +459,7 @@ async def handle_state_change(db: Session, reply_token: str, key: str, value: st
     set_system_state(db, key, value)
     await send_reply(reply_token, msg)
 
-# --- Proposal Handlers ---
-
 async def handle_proposals_list(reply_token: str):
-    """保留中の改善提案一覧を表示"""
     async with httpx.AsyncClient() as client:
         try:
             r = await client.get("http://memory-service:8003/proposals/", params={"status": "PENDING"})
@@ -512,7 +479,6 @@ async def handle_proposals_list(reply_token: str):
             await send_reply(reply_token, f"通信エラーが発生したばい: {e}")
 
 async def handle_proposal_detail(reply_token: str, prop_id: str):
-    """提案の詳細（修正計画やリスク）を表示"""
     async with httpx.AsyncClient() as client:
         try:
             r = await client.get(f"http://memory-service:8003/proposals/{prop_id}")
@@ -521,12 +487,6 @@ async def handle_proposal_detail(reply_token: str, prop_id: str):
                 text = f"【改修案詳細: {p.get('id', 'N/A')}】\n"
                 text += f"件名: {p.get('title', 'N/A')}\n"
                 text += f"内容: {p.get('description', 'N/A')}\n"
-                if p.get('files_affected'):
-                    text += f"対象: {p.get('files_affected')}\n"
-                if p.get('test_results'):
-                    text += f"\n【テスト結果】\n{p.get('test_results')}\n"
-                if p.get('diff_content'):
-                    text += f"\n【変更内容（抜粋）】\n{p.get('diff_content')[:500]}..."
                 await send_reply(reply_token, text)
             else:
                 await send_reply(reply_token, f"提案 {prop_id} が見つからんやった。")
@@ -534,31 +494,27 @@ async def handle_proposal_detail(reply_token: str, prop_id: str):
             await send_reply(reply_token, f"通信エラーばい: {e}")
 
 async def handle_proposal_approve(reply_token: str, prop_id: str):
-    """マスターの承認を受けてステータスを変更し、dev-agent に適用を指示"""
     admin_user_id = os.getenv("LINE_ADMIN_USER_ID", "")
     async with httpx.AsyncClient() as client:
         try:
             r = await client.patch(f"http://memory-service:8003/proposals/{prop_id}", json={"status": "APPROVED"})
             if r.status_code == 200:
-                # dev-agent に伝達
                 try:
                     await client.post(f"http://dev-agent:8013/apply/{prop_id}", 
                                      headers={"X-Internal-Token": INTERNAL_TOKEN},
                                      timeout=5.0)
-                    await send_reply(reply_token, f"了解！改修案 {prop_id} の出航（適用）を許可したばい。整備を開始するけん、ちょっと待っとってね！")
-                    # バックグラウンドで完了を監視して報告する
+                    await send_reply(reply_token, f"了解！改修案 {prop_id} の適用を許可したばい。整備を開始するね！")
                     asyncio.create_task(_monitor_apply_result(prop_id, admin_user_id))
                 except Exception as e:
                     logger.error(f"Failed to notify dev-agent: {e}")
-                    await send_reply(reply_token, f"承認は記録したばってん、整備士（dev-agent）に連絡がつかなかったばい。後でもう一度「承認 {prop_id}」って送ってみて！")
+                    await send_reply(reply_token, f"承認は記録したばってん、整備士に連絡がつかなかったばい。")
             else:
                 await send_reply(reply_token, "承認処理に失敗したばい。")
         except Exception as e:
             await send_reply(reply_token, f"通信エラーばい: {e}")
 
 async def _monitor_apply_result(prop_id: str, admin_user_id: str):
-    """dev-agent の適用結果を監視し、完了/失敗を LINE で報告する"""
-    for i in range(12):  # 最大60秒間（5秒 x 12回）監視
+    for i in range(12):
         await asyncio.sleep(5)
         try:
             async with httpx.AsyncClient() as client:
@@ -566,125 +522,84 @@ async def _monitor_apply_result(prop_id: str, admin_user_id: str):
                 if r.status_code == 200:
                     status = r.json().get("status", "")
                     if status == "APPLIED":
-                        msg = f"🎉 改修案 {prop_id} の整備（適用）が完了したばい！正常に反映されたけん、安心してね。次回の再起動で有効になるばい！"
-                        logger.info(f"Proposal {prop_id} applied successfully.")
                         if admin_user_id:
-                            await send_push(admin_user_id, msg)
+                            await send_push(admin_user_id, f"🎉 改修案 {prop_id} の適用が完了したばい！")
                         return
                     elif status == "FAILED":
-                        msg = f"⚠️ 改修案 {prop_id} の適用に失敗したばい。ログを確認してね。"
-                        logger.error(f"Proposal {prop_id} apply failed.")
                         if admin_user_id:
-                            await send_push(admin_user_id, msg)
+                            await send_push(admin_user_id, f"⚠️ 改修案 {prop_id} の適用に失敗したばい。")
                         return
-        except Exception as e:
-            logger.warn(f"Monitor apply check error: {e}")
-    # タイムアウト
-    logger.warn(f"Apply monitor timed out for {prop_id}")
-    if admin_user_id:
-        await send_push(admin_user_id, f"⏰ 改修案 {prop_id} の適用状態を確認できんかったばい。`/proposals` で確認してみて！")
+        except Exception:
+            pass
 
 async def handle_proposal_reject(reply_token: str, prop_id: str):
-    """提案を却下"""
     async with httpx.AsyncClient() as client:
         try:
             r = await client.patch(f"http://memory-service:8003/proposals/{prop_id}", json={"status": "REJECTED"})
             if r.status_code == 200:
-                await send_reply(reply_token, f"了解したばい。改修案 {prop_id} は破棄（アーカイブ）したよ。")
+                await send_reply(reply_token, f"了解したばい。改修案 {prop_id} は破棄したよ。")
             else:
                 await send_reply(reply_token, "却下処理に失敗したばい。")
         except Exception as e:
             await send_reply(reply_token, f"通信エラーばい: {e}")
 
 async def handle_sync_command(reply_token: str):
-    """GitHub から最新コードを同期する"""
-    await send_reply(reply_token, "了解！最新の魂（コード）を GitHub から取り込んでくるばい。ちょっと待っとってね。")
-    
+    await send_reply(reply_token, "了解！最新コードを GitHub から同期してくるばい。")
     try:
         async with httpx.AsyncClient() as client:
-            # dev-agent の /sync エンドポイントを叩く
             resp = await client.post("http://dev-agent:8013/sync", 
                                     headers={"X-Internal-Token": INTERNAL_TOKEN},
                                     timeout=40.0)
             if resp.status_code == 200:
-                data = resp.json()
-                msg = data.get("message", "同期が完了したばい！")
-                msg += "\n\n反映させるために、必要があれば AYN を再起動（docker compose restart 等）してね！"
-                await send_reply(reply_token, msg)
+                await send_reply(reply_token, "同期が完了したばい！再起動で反映されるよ。")
             else:
-                await send_reply(reply_token, f"ごめん、うまく同期できんかった...。 (HTTP {resp.status_code})")
+                await send_reply(reply_token, "同期に失敗したばい。")
     except Exception as e:
-        logger.error(f"Sync command error: {e}")
-        await send_reply(reply_token, f"同期中にエラーが起きたばい。後でもう一回試してみて：{e}")
+        await send_reply(reply_token, f"同期中にエラーが起きたばい: {e}")
 
 async def handle_restart_command(reply_token: str):
-    """システム全体を再起動する指示を watchdog へ送る"""
-    await send_reply(reply_token, "了解！システム全体を再起動（リブート）して、最新の状態にするばい。再起動中はしばらく反応できんくなるけん、ちょっと待っとってね。全速前進！🚢💨")
+    await send_reply(reply_token, "了解！再起動するばい。全速前進！🚢💨")
     try:
         async with httpx.AsyncClient() as client:
             await client.post("http://watchdog:8005/restart", timeout=5.0)
-    except Exception as e:
-        logger.error(f"Failed to trigger restart: {e}")
+    except Exception:
+        pass
 
 async def handle_update_command(reply_token: str):
-    """chown + git pull + restart を一括実行する"""
-    await send_reply(reply_token, "了解！フルアップデートを開始するばい！\n\n① パーミッション修正\n② 最新コード取得\n③ 全コンテナ再起動\n\nしばらく反応できんくなるけん、待っとってね！🚢💨")
+    await send_reply(reply_token, "了解！フルアップデートを開始するばい！待っとってね！🚢💨")
     try:
         async with httpx.AsyncClient() as client:
             await client.post("http://dev-agent:8013/update", 
                              headers={"X-Internal-Token": INTERNAL_TOKEN},
                              timeout=5.0)
-    except Exception as e:
-        logger.error(f"Failed to trigger update: {e}")
+    except Exception:
+        pass
 
 # --- Main Message Endpoint ---
 
 @app.post("/api/v1/message")
 async def receive_message(payload: MessagePayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """LINE等から送られてきたテキストを解釈し、対応する処理や他サービスへルーティングする"""
     raw_text = payload.text.strip()
-    # 全角スペースを半角に変換して処理しやすくする
-    text_canonical = raw_text.replace("　", " ")
-    text = text_canonical.lower()
+    text = raw_text.replace("　", " ").lower()
 
-    # 安全系コマンド（最優先）
     if text == "stop":
         await handle_state_change(db, payload.reply_token, "ai_status", "STOPPED", "了解。緊急停止するけん。")
         set_system_state(db, "ship_mode", ShipMode.SOS.value)
         return
     elif text == "safe_mode":
-        await handle_state_change(db, payload.reply_token, "ship_mode", ShipMode.SOS.value, "SOSモード(Safe Mode)に移行したよ。")
+        await handle_state_change(db, payload.reply_token, "ship_mode", ShipMode.SOS.value, "SOSモードに移行したよ。")
         return
-
-    # モード切り替え系
-    if text == "autonomous on":
-        await handle_state_change(db, payload.reply_token, "ship_mode", ShipMode.SAIL.value, "SAILモード(自律運転)をオンにしたばい！")
+    elif text == "autonomous on":
+        await handle_state_change(db, payload.reply_token, "ship_mode", ShipMode.SAIL.value, "SAILモードをオンにしたばい！")
         return
     elif text == "autonomous off":
-        await handle_state_change(db, payload.reply_token, "ship_mode", ShipMode.PORT.value, "PORTモード(待機)に戻ったよ。")
+        await handle_state_change(db, payload.reply_token, "ship_mode", ShipMode.PORT.value, "PORTモードに戻ったよ。")
         return
-    elif text == "自律停止":
-        await handle_state_change(db, payload.reply_token, "proactive_enabled", "OFF", "了解。自発的な話しかけを一時停止するね。")
-        return
-    elif text == "自律再開":
-        await handle_state_change(db, payload.reply_token, "proactive_enabled", "ON", "自律思考を再開したよ！また何か気づいたら教えるね。")
-        return
-    elif text.startswith("voice mode"):
-        parts = text.split()
-        if len(parts) > 2:
-            v_mode = parts[2].upper()
-            if v_mode in ["NURSE", "OAI", "HYB"]:
-                await handle_state_change(db, payload.reply_token, "voice_mode", v_mode, f"音声モードを {v_mode} に変更したよ。")
-                return
-        await send_reply(payload.reply_token, "voice mode は NURSE, OAI, HYB のどれかを指定してね。")
-        return
-
-    # 情報・確認系コマンド
-    if text == "health":
+    elif text == "health":
         await handle_health_command(db, payload.reply_token)
         return
     elif text == "version" or text == "バージョン":
-        v_msg = f"【shipOS システム情報】\n・システム名称: BCNOFNe system\n・バージョン: {SYSTEM_VERSION}\n・整備士(dev-agent): {DEV_AGENT_VERSION}\n\n今のうちはこのバージョンで絶好調ばい！全速前進！🚢💨"
+        v_msg = f"【shipOS システム情報】\n・システム名称: BCNOFNe system\n・バージョン: {SYSTEM_VERSION}\n・整備士(dev-agent): {DEV_AGENT_VERSION}\n\n絶好調ばい！🚢💨"
         await send_reply(payload.reply_token, v_msg)
         return
     elif text == "status":
@@ -705,59 +620,44 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
     elif text == "再起動" or text == "リスタート":
         await handle_restart_command(payload.reply_token)
         return
-
-    # 改修案・承認系
-    if text == "改修案一覧" or text == "改修案":
+    elif text == "改修案一覧" or text == "改修案":
         await handle_proposals_list(payload.reply_token)
         return
     elif text.startswith("承認 "):
-        parts = text_canonical.split()
-        if len(parts) > 1:
-            prop_id = parts[1].upper()
-            await handle_proposal_approve(payload.reply_token, prop_id)
-            return
+        prop_id = text.split()[1].upper()
+        await handle_proposal_approve(payload.reply_token, prop_id)
+        return
     elif text.startswith("却下 "):
-        parts = text_canonical.split()
-        if len(parts) > 1:
-            prop_id = parts[1].upper()
-            await handle_proposal_reject(payload.reply_token, prop_id)
-            return
+        prop_id = text.split()[1].upper()
+        await handle_proposal_reject(payload.reply_token, prop_id)
+        return
     elif text.startswith("詳細 "):
-        parts = text_canonical.split()
-        if len(parts) > 1:
-            prop_id = parts[1].upper()
-            await handle_proposal_detail(payload.reply_token, prop_id)
-            return
-
-    # ---- AI 通常会話（OpenAI 連携） ----
-    ai_status = get_system_state(db, "ai_status", "RUNNING")
-    if ai_status == "STOPPED":
-        stop_reason = get_system_state(db, "ai_stop_reason", "マスターの指示")
-        await send_reply(payload.reply_token, f"(AIは停止中です。理由: {stop_reason})")
+        prop_id = text.split()[1].upper()
+        await handle_proposal_detail(payload.reply_token, prop_id)
         return
 
-    # OLED の DEST を更新
+    # Normal AI Conversation
+    ai_status = get_system_state(db, "ai_status", "RUNNING")
+    if ai_status == "STOPPED":
+        await send_reply(payload.reply_token, "(AIは停止中です)")
+        return
+
     set_system_state(db, "ai_target_goal", f"対話中:{payload.text[:10]}")
 
-    # OpenAI を呼び出して自律的な応答を生成
     async def process_ai_reply():
         try:
-            # 1. 記憶コンテキストの取得
             brain_context = await get_brain_context()
-
-            # 2. 課金チェック（簡易版）
             async with httpx.AsyncClient() as client:
                 billing_resp = await client.post("http://billing-guard:8002/check_high_cost_operation", 
-                                                 json={"estimated_cost_jpy": 2.0}) # 1回約2円と見積もり
+                                                 json={"estimated_cost_jpy": 2.0})
                 if billing_resp.status_code == 200 and not billing_resp.json().get("allowed", True):
-                    await send_reply(payload.reply_token, "課金上限に達したみたいで、これ以上おしゃべりできんと。ごめんね。")
+                    await send_reply(payload.reply_token, "課金上限に達したみたいばい。ごめんね。")
                     return
 
-            # 3. OpenAI API 呼び出し
             response = await openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT + f"\n\n【脳内コンテキスト（現在の状況と記憶）】\n{brain_context}"},
+                    {"role": "system", "content": SYSTEM_PROMPT + f"\n\n【脳内コンテキスト】\n{brain_context}"},
                     {"role": "user", "content": payload.text}
                 ],
                 max_tokens=400,
@@ -765,20 +665,12 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
             )
             reply_text = response.choices[0].message.content.strip()
             await report_usage(response)
-
-            # 4. 返信
             await send_reply(payload.reply_token, reply_text)
-
-            # 5. メモリへの保存 (WORKING)
-            await record_working_memory(f"Conversation with {AI_USER_NAME}", f"Master: {payload.text}\nAYN: {reply_text}")
-            logger.info(f"AI Response with context: {reply_text[:50]}...")
-            
-            # OLED の DEST をリセット（または次を待機）
+            await record_working_memory(f"Conversation", f"Master: {payload.text}\nAYN: {reply_text}")
             set_system_state(db, "ai_target_goal", "待機中ばい")
-
         except Exception as e:
             logger.error(f"OpenAI error: {e}")
-            await send_reply(payload.reply_token, f"頭がボーッとしてうまく考えられんと。少し休ませて… (エラー: {e})")
+            await send_reply(payload.reply_token, f"頭がボーッとしてうまく考えられんと... (エラー: {e})")
 
     background_tasks.add_task(process_ai_reply)
     return {"status": "accepted"}
