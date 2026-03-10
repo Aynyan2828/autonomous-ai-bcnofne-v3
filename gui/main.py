@@ -120,6 +120,57 @@ html_template = """
             font-size: 0.75em;
             cursor: pointer;
         }
+
+        /* 提案ビュー */
+        .proposal-details {
+            border: 1px solid rgba(74, 246, 38, 0.2);
+            border-radius: 4px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .proposal-summary {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 8px 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85em;
+            list-style: none;
+        }
+        .proposal-summary::-webkit-details-marker { display: none; }
+        
+        .prop-id { color: #00bcd4; font-family: monospace; }
+        .prop-status {
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .status-PENDING { background: #ffeb3b; color: #000; }
+        .status-APPROVED, .status-APPLIED { background: #4af626; color: #000; }
+        .status-REJECTED, .status-FAILED { background: #f44336; color: #fff; }
+        .prop-title { flex: 1; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: bold; }
+        
+        .proposal-content {
+            padding: 10px;
+            font-size: 0.8em;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .prop-desc { margin-bottom: 8px; color: #e0e0e0; line-height: 1.4; }
+        .prop-reason { margin-bottom: 8px; color: #00bcd4; }
+        .prop-code {
+            background: #000;
+            padding: 8px;
+            border-radius: 4px;
+            overflow-x: auto;
+            color: #a5d6ff;
+            font-family: monospace;
+            font-size: 0.9em;
+            margin-top: 4px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
 </head>
@@ -156,6 +207,33 @@ html_template = """
         </div>
     </div>
     
+    <!-- 自律改修案 (Proposals) -->
+    <div class="card">
+        <h2>🛠️ 自律改修案 (Proposals)</h2>
+        {% for prop in proposals %}
+        <details class="proposal-details">
+            <summary class="proposal-summary">
+                <span class="prop-id">{{ prop.id }}</span>
+                <span class="prop-status status-{{ prop.status }}">{{ prop.status }}</span>
+                <span class="prop-title">{{ prop.title }}</span>
+            </summary>
+            <div class="proposal-content">
+                <p class="prop-desc">{{ prop.description }}</p>
+                {% if prop.reason %}
+                <p class="prop-reason"><strong>選定理由:</strong> {{ prop.reason }}</p>
+                {% endif %}
+                {% if prop.diff %}
+                <strong>生成コード差分:</strong>
+                <pre class="prop-code"><code>{{ prop.diff }}</code></pre>
+                {% endif %}
+            </div>
+        </details>
+        {% endfor %}
+        {% if not proposals %}
+        <div class="log-entry"><span class="log-msg">現在、提案されとる改修案はなかよ。</span></div>
+        {% endif %}
+    </div>
+
     <!-- ログ -->
     <div class="card">
         <h2>📋 ログ</h2>
@@ -223,7 +301,7 @@ async def read_dashboard(request: Request):
 
     try:
         from shared.database import SessionLocal
-        from shared.models import SystemState, SystemLog
+        from shared.models import SystemState, SystemLog, AutoImprovementProposal
         db = SessionLocal()
         
         states = db.query(SystemState).all()
@@ -238,6 +316,18 @@ async def read_dashboard(request: Request):
                 "service": entry.service_name or "??",
                 "level": entry.level or "INFO",
                 "message": entry.message or ""
+            })
+        
+        proposals_raw = db.query(AutoImprovementProposal).order_by(AutoImprovementProposal.created_at.desc()).limit(10).all()
+        proposals = []
+        for p in proposals_raw:
+            proposals.append({
+                "id": p.id,
+                "status": p.status,
+                "title": p.title,
+                "description": p.description,
+                "reason": p.target_selection_reason,
+                "diff": p.diff_content
             })
         
         db.close()
@@ -258,6 +348,7 @@ async def read_dashboard(request: Request):
         request=request,
         system_states=system_states,
         billing_data=billing_data,
-        logs=logs
+        logs=logs,
+        proposals=proposals
     )
     return HTMLResponse(content=rendered)
