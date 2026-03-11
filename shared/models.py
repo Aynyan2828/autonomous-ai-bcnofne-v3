@@ -103,3 +103,51 @@ class AutoImprovementProposal(Base):
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+class SelfModelParam(Base):
+    """AIの自己認識モデル (Self Model)"""
+    __tablename__ = "self_model_params"
+
+    id = Column(String, primary_key=True, index=True) # e.g., "AYN"
+    base_name = Column(String, nullable=False)
+    ship_name = Column(String, nullable=False)
+    core_purpose = Column(Text, nullable=True)
+    strengths = Column(Text, nullable=True) # JSON array/dict
+    weaknesses = Column(Text, nullable=True) # JSON array/dict
+    custom_attrs = Column(Text, nullable=True) # JSON dict
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+class InternalStateHistory(Base):
+    """感情・内部状態履歴 (Internal State History)"""
+    __tablename__ = "internal_state_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    state_name = Column(String, nullable=False, index=True) # CALM, STORM, FOCUSED, etc.
+    trigger_reason = Column(Text, nullable=True)
+    cpu_load = Column(Float, nullable=True)
+    error_rate = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class GoalHistory(Base):
+    """目標生成の履歴 (Goal History)"""
+    __tablename__ = "goal_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    goal_type = Column(String, nullable=False, index=True) # DAILY, SHORT_TERM, MISSION
+    goal_text_ja = Column(Text, nullable=False)
+    goal_text_en = Column(Text, nullable=False)
+    status = Column(String, default="ACTIVE", index=True) # ACTIVE, COMPLETED, ABANDONED
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+class EvolutionLog(Base):
+    """重大なアップデートや自己進化の履歴 (Evolution Log)"""
+    __tablename__ = "evolution_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    version = Column(String, nullable=False, index=True) # e.g., "v3.3.0"
+    event_type = Column(String, nullable=False, index=True) # "CORE_UPDATE", "MODEL_SWAP", "NEW_SKILL"
+    description_ja = Column(Text, nullable=False)
+    description_en = Column(Text, nullable=False)
+    files_changed = Column(Text, nullable=True) # CSV or JSON list
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

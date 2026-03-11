@@ -17,7 +17,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared import init_db
 from shared.logger import ShipLogger
 from shared.database import SessionLocal
-from shared.models import SystemState, SystemLog, AutoImprovementProposal
+from shared.models import SystemState, SystemLog, AutoImprovementProposal, EvolutionLog
+from shared.bilingual_formatter import format_bilingual
+from shared.public_exporter import export_to_public_markdown
 from sqlalchemy import func
 
 VERSION = "v3.3.0"
@@ -88,6 +90,39 @@ async def send_push_notification(text: str):
                              timeout=5.0)
         except Exception as e:
             logger.error(f"Failed to send push notification: {e}")
+
+def record_evolution_log(version: str, event_type: str, desc_ja: str, desc_en: str, files_changed: str = None):
+    """重大なシステム変更を進化録（Evolution Log）に記録する"""
+    db = SessionLocal()
+    try:
+        new_log = EvolutionLog(
+            version=version,
+            event_type=event_type,
+            description_ja=desc_ja,
+            description_en=desc_en,
+            files_changed=files_changed
+        )
+        db.add(new_log)
+        db.commit()
+        logger.info(f"Evolution log recorded: {event_type} - {desc_ja[:30]}")
+        
+        # 公開用Markdownのエクスポート
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        content = f"# Evolution Log: {event_type}\n\n"
+        content += f"- **Date**: {date_str}\n"
+        content += f"- **Version**: {version}\n"
+        content += f"- **Target Files**: {files_changed or 'N/A'}\n\n"
+        content += f"## Description\n{desc_ja}\n\n"
+        content += f"## Details\n{desc_en}\n"
+        
+        # ファイル名は日付とイベントタイプでユニークにする
+        suffix = event_type.lower()
+        export_to_public_markdown("evolution_log", f"{date_str}_{suffix}", content)
+        
+    except Exception as e:
+        logger.error(f"Failed to record evolution log: {e}")
+    finally:
+        db.close()
 
 # --- AI Intelligence Helpers ---
 
@@ -321,6 +356,14 @@ async def execute_full_update():
             f"✅ アップデート完了したばい！\n" + "\n".join(steps) + "\n\n再起動中やけん、30秒くらい待っとってね！🚢💨"
         )
         
+        # 進化録に記録
+        record_evolution_log(
+            version=VERSION,
+            event_type="CORE_UPDATE",
+            desc_ja="マスターからの指示でフルアップデート（強制同期）を実行しました。",
+            desc_en="Executed full system update (forced sync) by user request."
+        )
+        
         # watchdog に再起動をリクエスト
         async with httpx.AsyncClient() as client:
             try:
@@ -415,6 +458,16 @@ async def execute_apply(proposal_id: str):
         
         logger.info(f"Apply completed for {proposal_id}. Awaiting service restart...")
         await send_push_notification(f"マスター、改修案 {proposal_id} の整備（適用）が完了したばい！正常に反映されたけん、安心してね。")
+        
+        # 進化録に記録
+        files_joined = ",".join(files)
+        record_evolution_log(
+            version=VERSION,
+            event_type="AUTO_IMPROVEMENT",
+            desc_ja=f"改修案 {proposal_id} を適用し、システムを進化させました。",
+            desc_en=f"Applied auto-improvement proposal {proposal_id}. Evolving system.",
+            files_changed=files_joined
+        )
         
         # 最後に全体の権限を修正
         _fix_git_permissions()
@@ -517,13 +570,16 @@ async def run_autonomous_observation():
 1. 障害統計や記憶から、ボトルネックや修正が必要な箇所を特定してください。
 2. 修正候補を最大3つ挙げ、それぞれの「選定理由」「自信度(0.0-1.0)」「修正計画」を考えてください。
 3. 最も優先度・自信度が高いものをプライマリとして提案してください。
+4. 必ず日本語と英語の両方のテキストを生成してください。
 
 出力は以下の JSON 形式で答えてください：
 {{
   "candidates": [
     {{
-      "title": "改善のタイトル",
-      "description": "なぜこれが必要か (evidence summary)",
+      "title_ja": "改善のタイトル (日本語)",
+      "title_en": "Improvement title (English)",
+      "description_ja": "なぜこれが必要か (日本語)",
+      "description_en": "Why this is needed (English)",
       "files": ["修正ファイルパス1", "..."],
       "plan": "具体的な修正内容の指示",
       "reason": "このファイルを選んだ技術的・論理的理由",
@@ -547,6 +603,16 @@ async def run_autonomous_observation():
 
         # 自信度が最も高いものを選択
         suggestion = max(candidates, key=lambda x: x.get("confidence", 0.0))
+        
+        # バイリンガルに結合
+        title_ja = suggestion.get("title_ja", "名称未設定")
+        title_en = suggestion.get("title_en", "Untitled")
+        desc_ja = suggestion.get("description_ja", "詳細なし")
+        desc_en = suggestion.get("description_en", "No description")
+        
+        # タイトルは1行におさめたいので " / " で結合
+        suggestion["title"] = f"{title_ja} / {title_en}"
+        suggestion["description"] = format_bilingual(desc_ja, desc_en)
         
         # IDとメタデータの付与
         suggestion["id"] = f"PROP-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"

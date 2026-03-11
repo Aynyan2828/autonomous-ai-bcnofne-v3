@@ -1,6 +1,6 @@
 from sqlalchemy import text, inspect
 from .database import engine, longterm_engine, get_db, SessionLocal
-from .models import Base, SystemState, DiaryEntry, Memory, SystemLog, ShipMode, LogLevel
+from .models import Base, SystemState, DiaryEntry, Memory, SystemLog, ShipMode, LogLevel, SelfModelParam, InternalStateHistory, GoalHistory, EvolutionLog
 
 def migrate_db(target_engine):
     """欠落しているカラムを自動で追加する簡易マイグレーション処操"""

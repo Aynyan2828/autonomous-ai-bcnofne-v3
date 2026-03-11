@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from shared.database import SessionLocal
 from shared.models import SystemLog, LogLevel
+from shared.bilingual_formatter import format_bilingual
 
 class ShipLogger:
     def __init__(self, service_name: str):
@@ -71,27 +72,31 @@ class ShipLogger:
             # ここではエラーを避けるために独立したスレッドで実行するか、単に無視する
             pass 
 
-    def info(self, message: str):
-        print(f"[{self.service_name}] INFO: {message}")
-        self._log_to_db(LogLevel.INFO.value, message)
-        self._log_to_json(LogLevel.INFO.value, message)
+    def info(self, message: str, message_en: str = None):
+        final_msg = format_bilingual(message, message_en) if message_en else message
+        print(f"[{self.service_name}] INFO: {final_msg.replace(chr(10), ' | ')}")
+        self._log_to_db(LogLevel.INFO.value, final_msg)
+        self._log_to_json(LogLevel.INFO.value, final_msg)
 
-    def warn(self, message: str):
-        print(f"[{self.service_name}] WARN: {message}")
-        self._log_to_db(LogLevel.WARN.value, message)
-        self._log_to_json(LogLevel.WARN.value, message)
-        self._send_notification(LogLevel.WARN.value, message)
+    def warn(self, message: str, message_en: str = None):
+        final_msg = format_bilingual(message, message_en) if message_en else message
+        print(f"[{self.service_name}] WARN: {final_msg.replace(chr(10), ' | ')}")
+        self._log_to_db(LogLevel.WARN.value, final_msg)
+        self._log_to_json(LogLevel.WARN.value, final_msg)
+        self._send_notification(LogLevel.WARN.value, final_msg)
 
-    def error(self, message: str):
-        print(f"[{self.service_name}] ERROR: {message}")
-        self._log_to_db(LogLevel.ERROR.value, message)
-        self._log_to_json(LogLevel.ERROR.value, message)
-        self._send_notification(LogLevel.ERROR.value, message)
+    def error(self, message: str, message_en: str = None):
+        final_msg = format_bilingual(message, message_en) if message_en else message
+        print(f"[{self.service_name}] ERROR: {final_msg.replace(chr(10), ' | ')}")
+        self._log_to_db(LogLevel.ERROR.value, final_msg)
+        self._log_to_json(LogLevel.ERROR.value, final_msg)
+        self._send_notification(LogLevel.ERROR.value, final_msg)
 
-    def critical(self, message: str):
-        print(f"[{self.service_name}] CRITICAL: {message}")
-        self._log_to_db(LogLevel.CRITICAL.value, message)
-        self._log_to_json(LogLevel.CRITICAL.value, message)
-        self._send_notification(LogLevel.CRITICAL.value, message)
+    def critical(self, message: str, message_en: str = None):
+        final_msg = format_bilingual(message, message_en) if message_en else message
+        print(f"[{self.service_name}] CRITICAL: {final_msg.replace(chr(10), ' | ')}")
+        self._log_to_db(LogLevel.CRITICAL.value, final_msg)
+        self._log_to_json(LogLevel.CRITICAL.value, final_msg)
+        self._send_notification(LogLevel.CRITICAL.value, final_msg)
 
 # Usage: logger = ShipLogger("core")

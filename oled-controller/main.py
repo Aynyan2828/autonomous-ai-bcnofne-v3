@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.database import SessionLocal
-from shared.models import SystemState, ShipMode
+from shared.models import SystemState, ShipMode, InternalStateHistory
 from shared.logger import ShipLogger
 
 logger = ShipLogger("oled-controller")
@@ -81,6 +81,16 @@ AI_STATE_FACE = {
     "Wait":          "(o_o)",
     "RUNNING":       "(o_o)",
     "STOPPED":       "(x_x)",
+}
+
+INTERNAL_STATE_FACE = {
+    "CALM": "(^-^)",
+    "STORM": "(>_<)",
+    "TIRED": "(=_=)",
+    "FOCUSED": "(*_*)",
+    "CURIOUS": "(O_O)",
+    "RELIEVED": "(^o^)",
+    "PROUD": "(`_`)"
 }
 
 # Runtime Variables
@@ -350,14 +360,17 @@ def update_oled(db: Session):
         dest_scroll_message = new_dest
         dest_scroll_pos = OLED_WIDTH
     
-    # Special faces mapping based on score
-    if score < 40:
-        ai_face = "(x_x)" 
-    elif ai_status == "Planning":
-        ai_face = "( ..)phi"
-    elif ai_status == "RUNNING" or ai_status == "Acting":
-        ai_face = "(o_o)"
+    # Internal State を取得して顔文字に反映
+    latest_state = db.query(InternalStateHistory).order_by(InternalStateHistory.id.desc()).first()
+    if latest_state:
+        ai_face = INTERNAL_STATE_FACE.get(latest_state.state_name, "(o_o)")
     else:
+        ai_face = "(^-^)"
+        
+    # ハードウェアエラー等による上書き（優先）
+    if score < 40 and temp >= 60:
+        ai_face = "(x_x)" 
+    elif ai_status == "STOPPED":
         ai_face = "(-_-)"
 
 

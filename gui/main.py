@@ -153,8 +153,8 @@ html_template = """
             border-top: 1px solid rgba(255,255,255,0.05);
             background: rgba(0, 0, 0, 0.2);
         }
-        .prop-desc { margin-bottom: 8px; color: #e0e0e0; line-height: 1.4; }
-        .prop-reason { margin-bottom: 8px; color: #00bcd4; }
+        .prop-desc { margin-bottom: 8px; color: #e0e0e0; line-height: 1.4; white-space: pre-wrap; }
+        .prop-reason { margin-bottom: 8px; color: #00bcd4; font-style: italic; }
         
         .action-btn { padding: 6px 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 0.9em; flex: 1; }
         .apply-btn { background: #4af626; color: #000; }

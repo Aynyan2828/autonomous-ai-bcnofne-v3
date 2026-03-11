@@ -11,9 +11,12 @@ from shared.database import SessionLocal, LongtermSessionLocal, get_db, get_long
 from shared import init_db
 from shared.models import Memory, AutoImprovementProposal, MemoryLayer, ProposalStatus
 from shared.logger import ShipLogger
-from datetime import datetime
+from shared.bilingual_formatter import format_bilingual
+from datetime import datetime, timezone, timedelta
+from openai import OpenAI
 
 logger = ShipLogger("memory-service")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = FastAPI(title="shipOS Memory Service")
 
@@ -149,6 +152,64 @@ def get_memory_summary(db: Session = Depends(get_db)):
         error_msg = f"Summary error: {str(e)}\n{traceback.format_exc()}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.post("/memories/reflect")
+def reflect_memories(db: Session = Depends(get_db)):
+    """
+    1日の終わりに動作し、直近の WORKING / EPISODIC な記憶を要約して
+    REFLECTIVE な記憶として沈殿（保存）させる Job エンドポイント。
+    """
+    one_day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+    target_layers = [MemoryLayer.WORKING.value, MemoryLayer.EPISODIC.value]
+    recent_memories = db.query(Memory).filter(
+        Memory.layer.in_(target_layers),
+        Memory.created_at >= one_day_ago
+    ).all()
+    
+    if not recent_memories:
+        return {"status": "skipped", "message": "No recent memories to reflect on."}
+        
+    mem_texts = [f"- [{m.topic}] {m.content}" for m in recent_memories]
+    mem_context = "\n".join(mem_texts)
+
+    prompt = f"""
+あなたは AYN です。これらは直近24時間のあなたの作業や出来事の記憶（WORKING / EPISODIC）です。
+これらを振り返り（Reflection）、今後の航海や自己改善に役立つ「教訓」「気づき」「パターンの抽象化」を生成してください。
+細かい出来事の羅列ではなく、より高次な洞察（REFLECTIVE）に変換してください。
+必ず「日本語\n英語」のバイリンガルフォーマットで出力してください。
+
+【記憶一覧】
+{mem_context}
+"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.7
+        )
+        reflection_text = response.choices[0].message.content.strip()
+        
+        # REFLECTIVE メモリとして保存
+        new_memory = Memory(
+            topic="Daily Reflection",
+            content=reflection_text,
+            layer=MemoryLayer.REFLECTIVE.value,
+            importance=4
+        )
+        db.add(new_memory)
+        
+        # 処理済みの古い WORKING メモリなどは削除または優先度を下げる（ここでは何もしないか、削除する）
+        # 簡単のため WORKING メモリだけ削除
+        db.query(Memory).filter(Memory.layer == MemoryLayer.WORKING.value, Memory.created_at >= one_day_ago).delete()
+        
+        db.commit()
+        logger.info(format_bilingual("Memory reflection 完了ばい！", "Memory reflection completed!"))
+        
+        return {"status": "success", "reflection": reflection_text}
+    except Exception as e:
+        logger.error(f"Reflection error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Proposal Endpoints ---
 
