@@ -9,10 +9,14 @@ from openai import OpenAI
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from shared import init_db
 from shared.database import SessionLocal
 from shared.models import SystemLog, DiaryEntry
 from shared.bilingual_formatter import format_bilingual
 from shared.public_exporter import export_to_public_markdown
+
+# データベース初期化
+init_db()
 
 # Initialize OpenAI client (synchronous is fine here as it's just an API, but we could use async. For fastAPI standard def, sync works but blocks. We should probably use async or make the route async).
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))

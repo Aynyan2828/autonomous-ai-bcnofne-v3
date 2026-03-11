@@ -12,6 +12,9 @@ from shared import init_db
 from shared.models import Memory, AutoImprovementProposal, MemoryLayer, ProposalStatus
 from shared.logger import ShipLogger
 from shared.bilingual_formatter import format_bilingual
+
+# データベース初期化
+init_db()
 from datetime import datetime, timezone, timedelta
 from openai import OpenAI
 
