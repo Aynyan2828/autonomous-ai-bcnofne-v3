@@ -527,7 +527,7 @@ async def handle_status_command(db: Session, reply_token: str):
 async def handle_diary_command(reply_token: str):
     async with httpx.AsyncClient() as client:
         try:
-            r = await client.post("http://diary-service:8004/diary/generate")
+            r = await client.post("http://diary-service:8004/diary/generate", timeout=60.0)
             if r.status_code == 200:
                 data = r.json()
                 await send_reply(reply_token, data["summary"])
