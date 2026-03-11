@@ -425,14 +425,17 @@ async def handle_self_command(db: Session, reply_token: str):
     self_info = get_self_model(db)
     current_state = evaluate_and_update_state(db)
     
+    ja_purpose = self_info['core_purpose']
+    en_purpose = "Evolve the system with the Master, supporting life and voyage safely." if "安全に生活や航海をサポート" in ja_purpose else ja_purpose
+
     ja_text = (f"【自己認識 (Self Model)】\n"
                f"名前: {self_info['base_name']}\n"
                f"状態: {current_state}\n"
-               f"目的: {self_info['core_purpose']}")
+               f"目的: {ja_purpose}")
     en_text = (f"[Self Model]\n"
                f"Name: {self_info['base_name']}\n"
                f"State: {current_state}\n"
-               f"Purpose: {self_info['core_purpose']}")
+               f"Purpose: {en_purpose}")
                
     await send_reply(reply_token, format_bilingual(ja_text, en_text))
 
