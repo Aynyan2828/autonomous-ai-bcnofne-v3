@@ -146,6 +146,31 @@ html_template = """
         .status-APPROVED, .status-APPLIED { background: #4af626; color: #000; }
         .status-REJECTED, .status-FAILED { background: #f44336; color: #fff; }
         .prop-title { flex: 1; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: bold; }
+
+        .prop-filter-bar {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+            overflow-x: auto;
+            padding-bottom: 2px;
+        }
+        .prop-tab-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #ccc;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8em;
+            white-space: nowrap;
+        }
+        .prop-tab-btn:hover { background: rgba(255, 255, 255, 0.1); }
+        .prop-tab-btn.active {
+            background: rgba(0, 188, 212, 0.2);
+            border-color: #00bcd4;
+            color: #fff;
+            font-weight: bold;
+        }
         
         .proposal-content {
             padding: 10px;
@@ -248,8 +273,16 @@ html_template = """
     <!-- 自律改修案 (Proposals) -->
     <div class="card">
         <h2>🛠️ 自律改修案 (Proposals)</h2>
+        <div class="prop-filter-bar">
+            <button class="prop-tab-btn active" onclick="filterProposals('PENDING', this)">PENDING</button>
+            <button class="prop-tab-btn" onclick="filterProposals('APPLIED', this)">APPLIED</button>
+            <button class="prop-tab-btn" onclick="filterProposals('REJECTED', this)">REJECTED</button>
+            <button class="prop-tab-btn" onclick="filterProposals('FAILED', this)">FAILED</button>
+            <button class="prop-tab-btn" onclick="filterProposals('ALL', this)">ALL</button>
+        </div>
+        
         {% for prop in proposals %}
-        <details class="proposal-details">
+        <details class="proposal-details prop-item" data-status="{{ prop.status }}">
             <summary class="proposal-summary">
                 <span class="prop-id">{{ prop.id }}</span>
                 <span class="prop-status status-{{ prop.status }}">{{ prop.status }}</span>
@@ -280,9 +313,7 @@ html_template = """
             </div>
         </details>
         {% endfor %}
-        {% if not proposals %}
-        <div class="log-entry"><span class="log-msg">現在、提案されとる改修案はなかよ。</span></div>
-        {% endif %}
+        <div id="prop-empty-msg" class="log-entry" style="display: none;"><span class="log-msg">このステータスの改修案はなかよ。</span></div>
     </div>
     
     <!-- 公開ログ (Voyage / Evolution) -->
@@ -339,6 +370,33 @@ html_template = """
     </div>
     
     <script>
+        function filterProposals(status, btn) {
+            document.querySelectorAll('.prop-tab-btn').forEach(b => b.classList.remove('active'));
+            if(btn) btn.classList.add('active');
+            
+            let visibleCount = 0;
+            document.querySelectorAll('.prop-item').forEach(e => {
+                const propStatus = e.getAttribute('data-status');
+                if (status === 'ALL' || propStatus === status) {
+                    e.style.display = '';
+                    visibleCount++;
+                } else {
+                    e.style.display = 'none';
+                }
+            });
+            
+            const emptyMsg = document.getElementById('prop-empty-msg');
+            if(emptyMsg) {
+                emptyMsg.style.display = visibleCount === 0 ? 'block' : 'none';
+            }
+        }
+
+        // ページロード時に PENDING タブをデフォルトで適用
+        document.addEventListener('DOMContentLoaded', () => {
+            const pendingBtn = document.querySelector('.prop-tab-btn.active');
+            filterProposals('PENDING', pendingBtn);
+        });
+
         function filterLogs(level, btn) {
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
