@@ -605,13 +605,9 @@ async def reject_proposal_api(proposal_id: str):
     """(Security Note: DB(memory-service)を直接更新してREJECTにする)"""
     try:
         async with httpx.AsyncClient() as client:
-            p_resp = await client.get(f"http://memory-service:8003/proposals/{proposal_id}")
-            if p_resp.status_code == 200:
-                p_data = p_resp.json()
-                p_data["status"] = "REJECTED"
-                u_resp = await client.put(f"http://memory-service:8003/proposals/{proposal_id}", json=p_data)
-                if u_resp.status_code == 200:
-                    return {"status": "success", "message": f"{proposal_id} の改修案を破棄したばい。"}
+            u_resp = await client.patch(f"http://memory-service:8003/proposals/{proposal_id}", json={"status": "REJECTED"})
+            if u_resp.status_code == 200:
+                return {"status": "success", "message": f"{proposal_id} の改修案を破棄したばい。"}
             return {"status": "error", "message": "破棄データの更新に失敗したばい...。"}
     except Exception as e:
         return {"status": "error", "message": f"通信エラーが発生したばい：{e}"}
