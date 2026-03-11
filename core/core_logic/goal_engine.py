@@ -7,8 +7,10 @@ import os
 from shared.models import GoalHistory, SystemLog
 from core.core_logic.self_model import get_self_model
 from core.core_logic.internal_state import get_current_internal_state
-from shared.openai_client import openai_client
+from openai import AsyncOpenAI
 from shared.logger import ShipLogger
+
+openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 logger = ShipLogger("core_goal_engine")
 

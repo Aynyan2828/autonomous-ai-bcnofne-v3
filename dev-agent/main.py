@@ -542,6 +542,17 @@ async def run_autonomous_observation():
         # 障害統計とリポジトリマップの取得
         failure_summary = await get_24h_failure_summary()
         repo_map = generate_repo_map()
+
+        # 過去の教訓 (Lessons Learned) を取得
+        past_lessons_text = "N/A"
+        try:
+            lessons_resp = await client.get(f"{MEMORY_SERVICE_URL}/lessons", params={"limit": 5}, timeout=5.0)
+            if lessons_resp.status_code == 200:
+                lessons = lessons_resp.json()
+                if lessons:
+                    past_lessons_text = "\n".join([f"- [{l['created_at'][:10]}] {l['content']}" for l in lessons])
+        except Exception as e:
+            logger.warn(f"Failed to fetch lessons: {e}")
         
         # 現在の提案（PENDING が多すぎればスキップ）
         try:
@@ -562,15 +573,19 @@ async def run_autonomous_observation():
 【現在の脳内コンテキスト】
 {brain_context}
 
+【過去の教訓 (Lessons Learned)】
+{past_lessons_text}
+
 {failure_summary}
 
 {repo_map}
 
 【任務】
-1. 障害統計や記憶から、ボトルネックや修正が必要な箇所を特定してください。
-2. 修正候補を最大3つ挙げ、それぞれの「選定理由」「自信度(0.0-1.0)」「修正計画」を考えてください。
-3. 最も優先度・自信度が高いものをプライマリとして提案してください。
-4. 必ず日本語と英語の両方のテキストを生成してください。
+1. 障害統計、記憶、および過去の教訓から、ボトルネックや修正が必要な箇所を特定してください。
+2. 過去の失敗や教訓を活かし、同じ間違いを繰り返さないような堅牢な計画を立ててください。
+3. 修正候補を最大3つ挙げ、それぞれの「選定理由」「自信度(0.0-1.0)」「修正計画」を考えてください。
+4. 最も優先度・自信度が高いものをプライマリとして提案してください。
+5. 必ず日本語と英語の両方のテキストを生成してください。
 
 出力は以下の JSON 形式で答えてください：
 {{

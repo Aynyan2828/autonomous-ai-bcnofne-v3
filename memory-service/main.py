@@ -156,6 +156,20 @@ def get_memory_summary(db: Session = Depends(get_db)):
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
+@app.get("/lessons", response_model=List[MemoryResponse])
+def get_lessons(limit: int = 10, db: Session = Depends(get_db)):
+    """
+    dev-agent などの自律改善向けに、過去の教訓（REFLECTIVE層）を抽出して返す。
+    """
+    try:
+        lessons = db.query(Memory).filter(
+            Memory.layer == MemoryLayer.REFLECTIVE.value
+        ).order_by(Memory.created_at.desc()).limit(limit).all()
+        return lessons
+    except Exception as e:
+        logger.error(f"Failed to fetch lessons: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/memories/reflect")
 def reflect_memories(db: Session = Depends(get_db)):
     """

@@ -194,6 +194,21 @@ html_template = """
         #fullCodeView {
             flex: 1; padding: 12px; overflow-y: auto; overflow-x: auto; background: #0d111b; color: #a5d6ff; font-family: monospace; font-size: 0.85em; white-space: pre-wrap;
         }
+
+        /* 公開ログセクション */
+        .public-log-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+        .public-log-item:hover { background: rgba(74, 246, 38, 0.1); }
+        .log-cat { color: #4af626; font-weight: bold; font-size: 0.8em; border: 1px solid #4af626; padding: 1px 4px; border-radius: 4px; margin-right: 8px; }
+        .log-name { flex: 1; color: #fff; }
+        .log-date { color: #666; font-size: 0.8em; }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
 </head>
@@ -268,6 +283,14 @@ html_template = """
         {% if not proposals %}
         <div class="log-entry"><span class="log-msg">現在、提案されとる改修案はなかよ。</span></div>
         {% endif %}
+    </div>
+    
+    <!-- 公開ログ (Voyage / Evolution) -->
+    <div class="card">
+        <h2>📖 公開ログ (Public Logs)</h2>
+        <div id="public-logs-container">
+            <div class="log-entry"><span class="log-msg">読み込み中ばい...</span></div>
+        </div>
     </div>
 
     <!-- ログ -->
@@ -409,8 +432,54 @@ html_template = """
             });
         }
         
+        // 公開ログの取得
+        function fetchPublicLogs() {
+            fetch('/api/public-logs')
+                .then(r => r.json())
+                .then(data => {
+                    const container = document.getElementById('public-logs-container');
+                    if (data.error) {
+                        container.innerHTML = `<div class="log-entry"><span class="log-msg">${data.error}</span></div>`;
+                        return;
+                    }
+                    if (data.logs.length === 0) {
+                        container.innerHTML = '<div class="log-entry"><span class="log-msg">公開ログはまだなかよ。</span></div>';
+                        return;
+                    }
+                    let html = '';
+                    data.logs.forEach(log => {
+                        html += `
+                            <div class="public-log-item" onclick="openPublicLog('${log.category}', '${log.name}')">
+                                <span class="log-cat">${log.category === 'voyage_log' ? '航海' : '進化'}</span>
+                                <span class="log-name">${log.name}</span>
+                                <span class="log-date">${log.mtime}</span>
+                            </div>
+                        `;
+                    });
+                    container.innerHTML = html;
+                });
+        }
+
+        function openPublicLog(category, filename) {
+            const path = category + '/' + filename;
+            document.getElementById('modalTitle').textContent = filename;
+            document.getElementById('fullCodeView').textContent = '読み込み中ばい...🚢';
+            document.getElementById('codeModal').style.display = 'flex';
+            
+            fetch('/api/public-log-content?path=' + encodeURIComponent(path))
+                .then(r => r.json())
+                .then(data => {
+                    if(data.error) {
+                        document.getElementById('fullCodeView').textContent = 'エラー: ' + data.error;
+                    } else {
+                        document.getElementById('fullCodeView').textContent = data.content;
+                    }
+                });
+        }
+
         // 初期化
         parseDiffs();
+        fetchPublicLogs();
         setTimeout(() => { if(document.getElementById('codeModal').style.display === 'none') location.reload(); }, 30000);
     </script>
 </body>
@@ -546,3 +615,56 @@ async def reject_proposal_api(proposal_id: str):
             return {"status": "error", "message": "破棄データの更新に失敗したばい...。"}
     except Exception as e:
         return {"status": "error", "message": f"通信エラーが発生したばい：{e}"}
+
+from datetime import datetime
+
+@app.get("/api/public-logs")
+async def get_public_logs():
+    """/mnt/hdd/logs/public 以下のファイルをリストアップする"""
+    import os
+    base_dir = "/mnt/hdd/logs/public"
+    logs = []
+    if not os.path.exists(base_dir):
+        return {"logs": []}
+    
+    try:
+        for cat in ["voyage_log", "evolution_log"]:
+            cat_dir = os.path.join(base_dir, cat)
+            if os.path.exists(cat_dir):
+                files = os.listdir(cat_dir)
+                for f in files:
+                    if f.endswith(".md"):
+                        fpath = os.path.join(cat_dir, f)
+                        mtime = os.path.getmtime(fpath)
+                        mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+                        logs.append({
+                            "category": cat,
+                            "name": f,
+                            "mtime": mtime_str,
+                            "ts": mtime
+                        })
+        # 新しい順にソート
+        logs.sort(key=lambda x: x["ts"], reverse=True)
+        return {"logs": logs[:20]}
+    except Exception as e:
+        return {"error": str(e), "logs": []}
+
+@app.get("/api/public-log-content")
+async def get_public_log_content(path: str):
+    """公開ログの内容を取得する"""
+    import os
+    base_dir = "/mnt/hdd/logs/public"
+    target_path = os.path.abspath(os.path.join(base_dir, path))
+    
+    if not target_path.startswith(os.path.abspath(base_dir)):
+        return {"error": "不正なファイルパスばい！"}
+    
+    if not os.path.exists(target_path):
+        return {"error": "ファイルが見つからんやったよ！"}
+        
+    try:
+        with open(target_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            return {"content": content}
+    except Exception as e:
+        return {"error": f"読み込み失敗：{str(e)}"}
