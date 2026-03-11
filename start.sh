@@ -57,11 +57,9 @@ echo "====================================="
 echo " Setting up External Webhook...      "
 echo "====================================="
 
-# [Option A] Ngrok (Dynamic URL)
-pkill ngrok
-sleep 1
-ngrok http 8001 > /dev/null 2>&1 &
-sleep 8 # Wait for ngrok
+# [Option A] Ngrok (Dynamic URL via Docker Container)
+# Docker-compose handles ngrok startup. We just need to fetch the URL.
+sleep 5 # Wait for ngrok container to spin up
 
 WEBHOOK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
 
