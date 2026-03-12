@@ -10,7 +10,7 @@ This document explains the setup procedure for connecting a 4-pin PWM fan to Ras
 | Pin (BCM) | Function | Color (Typical) |
 |-----------|----------|-----------------|
 | GPIO 18   | PWM Control | Blue / Green (PWM) |
-| GPIO 23   | RPM (Tach) | Yellow / White (TACH) |
+| GPIO 24   | RPM (Tach) | Yellow / White (TACH) |
 | 5V / 12V  | Power | Red |
 | GND       | Ground | Black |
 
