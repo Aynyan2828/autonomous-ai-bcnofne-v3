@@ -28,12 +28,19 @@ class DNSSummaryService:
                 if latest.metrics_json:
                     try:
                         m_data = json.loads(latest.metrics_json)
-                        # 各クライアントが返す error 情報を探す
-                        for key in ["status", "summary", "stats"]:
-                            val = m_data.get(key)
-                            if isinstance(val, dict) and "error" in val:
-                                error_info = val["error"]
-                                break
+                        # 最上位またはサブキーにある "error" を探す
+                        if isinstance(m_data, dict):
+                            if "error" in m_data:
+                                error_info = m_data["error"]
+                            else:
+                                for key in ["status", "summary", "stats"]:
+                                    val = m_data.get(key)
+                                    if isinstance(val, dict) and "error" in val:
+                                        error_info = val["error"]
+                                        break
+                                    elif isinstance(val, str) and ("error" in val.lower() or "fail" in val.lower()):
+                                        error_info = val
+                                        break
                     except:
                         pass
 
