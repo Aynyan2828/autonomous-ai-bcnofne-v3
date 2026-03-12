@@ -662,6 +662,9 @@ async def process_suggestion(suggestion):
         dest_path = os.path.join(WORKSPACE_DIR, f)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         if os.path.exists(src_path):
+            if os.path.isdir(src_path):
+                logger.warn(f"Skipping directory in proposal: {f}")
+                continue
             shutil.copy2(src_path, dest_path)
         else:
             with open(dest_path, "w") as empty_f:
