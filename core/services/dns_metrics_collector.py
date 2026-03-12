@@ -23,8 +23,8 @@ class DNSMetricsCollector:
             os.getenv("ADGUARD_PASSWORD", "password")
         )
         self.pihole = PiholeClient(
-            os.getenv("PIHOLE_URL", f"http://{host_ip}/admin"),
-            os.getenv("PIHOLE_API_TOKEN", "")
+            os.getenv("PIHOLE_URL", f"http://{host_ip}/api"), # v6 default is /api
+            os.getenv("PIHOLE_PASSWORD", "")
         )
         self.unbound = UnboundClient(
             os.getenv("UNBOUND_HOST", host_ip),
