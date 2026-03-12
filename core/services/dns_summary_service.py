@@ -82,10 +82,10 @@ class DNSSummaryService:
               f"{ag_line}\n"
               f"{ph_line}\n"
               f"{ub_line}\n\n"
-              f"データは5分おきに自動でチェックしとるよ。今日も安全なネット航海ばい！✨")
+              f"データは1日1回または手動でチェックしとるよ。今日も安全なネット航海ばい！✨")
               
         en = (f"Reporting DNS infrastructure status, Master! 🚩\n\n"
-              f"Check results from around the system. Auto-updated every 5 mins.\n\n"
+              f"Check results from around the system. Auto-updated daily or on-demand.\n\n"
               f"Safe sailing today! ✨")
               
         return format_bilingual(ja, en)

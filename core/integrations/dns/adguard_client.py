@@ -5,8 +5,9 @@ import base64
 class AdGuardClient(DNSClientBase):
     """AdGuard Home REST API クライアント"""
     def __init__(self, base_url: str, username: str, password: str, timeout: float = 5.0):
-        super().__init__(base_url, timeout)
-        auth_str = f"{username}:{password}"
+        # 末尾の / を除くだけでなく、空白も削除
+        super().__init__(base_url.strip().rstrip("/"), timeout)
+        auth_str = f"{username.strip()}:{password.strip()}"
         self.headers = {
             "Authorization": f"Basic {base64.b64encode(auth_str.encode()).decode()}"
         }
