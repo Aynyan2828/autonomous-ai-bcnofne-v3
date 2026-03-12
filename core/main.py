@@ -560,6 +560,12 @@ async def handle_diary_command(reply_token: str):
 
 async def handle_dns_status(db: Session, reply_token: str):
     from core.services.dns_summary_service import DNSSummaryService
+    from core.services.dns_metrics_collector import DNSMetricsCollector
+    
+    # 手動チェック時は、背景ループを待たずに最新情報を取得する
+    collector = DNSMetricsCollector()
+    await collector.collect_all()
+    
     stats = DNSSummaryService.get_daily_stats(db)
     report = DNSSummaryService.format_status_report(stats)
     await send_reply(reply_token, report)
