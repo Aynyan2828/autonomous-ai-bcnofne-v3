@@ -247,17 +247,15 @@ async def proactive_thinking_loop():
                         set_system_state(db, "ai_target_goal", "暇してるよ！指示ちょうだい( ・∀・)")
                     else:
                         set_system_state(db, "ai_target_goal", thought[:50]) # OLED用に少し短くして保存
-                        if admin_id:
-                            await send_push(admin_id, thought)
                             logger.info(f"Proactive thought sent: {thought[:30]}...")
-                except Exception as e:
-                    logger.error(f"Error during proactive reasoning: {e}")
-            else:
-                if (datetime.now().minute % 10) == 0: # 10分周期で死活監視ログ
-                    logger.info(f"AYN Heartbeat (Mode: {mode})")
+                        except Exception as e:
+                            logger.error(f"Error during proactive reasoning: {e}")
+                else:
+                    if (datetime.now().minute % 10) == 0: # 10分周期で死活監視ログ
+                        logger.info(f"AYN Heartbeat (Mode: {mode})")
 
-            db.close()
-            await asyncio.sleep(600) # 10分ごとに繰り返す
+                db.close()
+                await asyncio.sleep(600) # 10分ごとに繰り返す
     except asyncio.CancelledError:
         pass
     except Exception as e:
