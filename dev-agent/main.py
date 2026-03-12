@@ -54,9 +54,13 @@ def verify_internal_token(x_internal_token: str = Header(None)):
     return True
 
 def is_git_dirty() -> bool:
-    """Git に未コミットの変更があるかチェック"""
+    """Git に未コミットの変更があるかチェック (未追跡・パーミッション変更は無視)"""
     try:
-        res = subprocess.run(["git", "-C", SRC_DIR, "status", "--porcelain"], 
+        # パーミッション変更を無視するように設定 (Docker環境での誤検知防止)
+        subprocess.run(["git", "-C", SRC_DIR, "config", "core.filemode", "false"], check=False)
+        
+        # -uno: untracked なファイルは無視して、実質的な「変更」があるかだけ見る
+        res = subprocess.run(["git", "-C", SRC_DIR, "status", "--porcelain", "-uno"], 
                              capture_output=True, text=True, check=True)
         return len(res.stdout.strip()) > 0
     except:
@@ -317,6 +321,7 @@ async def execute_full_update():
         # 0. 強制中断（コンフリクト解消）
         subprocess.run(["git", "-C", SRC_DIR, "merge", "--abort"], check=False)
         subprocess.run(["git", "-C", SRC_DIR, "rebase", "--abort"], check=False)
+        subprocess.run(["git", "-C", SRC_DIR, "config", "core.filemode", "false"], check=False)
 
         # 1. git パーミッション修正
         _fix_git_permissions()
