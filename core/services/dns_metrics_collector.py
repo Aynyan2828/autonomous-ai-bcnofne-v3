@@ -28,59 +28,71 @@ class DNSMetricsCollector:
         )
         self.unbound = UnboundClient(
             os.getenv("UNBOUND_HOST", host_ip),
-            # Unbound defaults to 53 generally, but often users use 5353
             int(os.getenv("UNBOUND_PORT", "53"))
         )
 
     async def collect_all(self):
-        """全サービスのメトリクスを収集してDBに保存"""
+        """全サービスのメトリクスを収集してDBに保存 (逐次実行でSQLiteの競合を回避)"""
+        # 逐次実行することで、同一セッション内での競合を避ける
+        await self._collect_adguard()
+        await self._collect_pihole()
+        await self._collect_unbound()
+
+    async def _collect_adguard(self):
         db = SessionLocal()
         try:
-            await asyncio.gather(
-                self._collect_adguard(db),
-                self._collect_pihole(db),
-                self._collect_unbound(db)
+            stats = await self.adguard.get_stats()
+            status_info = await self.adguard.get_status()
+            
+            status = "ONLINE" if status_info else "OFFLINE"
+            metrics = DNSMetrics(
+                service_type="adguard",
+                status=status,
+                query_count=stats.get("num_dns_queries", 0) if stats else 0,
+                block_count=stats.get("num_blocked_filtering", 0) if stats else 0,
+                metrics_json=json.dumps({"stats": stats, "status": status_info}) if (stats or status_info) else None
             )
+            db.add(metrics)
+            db.commit()
+        except Exception as e:
+            logger.error(f"AdGuard collection failed: {e}")
         finally:
             db.close()
 
-    async def _collect_adguard(self, db: Session):
-        stats = await self.adguard.get_stats()
-        status_info = await self.adguard.get_status()
-        
-        status = "ONLINE" if status_info else "OFFLINE"
-        metrics = DNSMetrics(
-            service_type="adguard",
-            status=status,
-            query_count=stats.get("num_dns_queries", 0) if stats else 0,
-            block_count=stats.get("num_blocked_filtering", 0) if stats else 0,
-            metrics_json=json.dumps(stats) if stats else None
-        )
-        db.add(metrics)
-        db.commit()
+    async def _collect_pihole(self):
+        db = SessionLocal()
+        try:
+            summary = await self.pihole.get_summary()
+            status_info = await self.pihole.get_status()
+            
+            status = "ONLINE" if (status_info and status_info.get("status") == "enabled") else "OFFLINE"
+            metrics = DNSMetrics(
+                service_type="pihole",
+                status=status,
+                query_count=summary.get("dns_queries_today", 0) if summary else 0,
+                block_count=summary.get("ads_blocked_today", 0) if summary else 0,
+                metrics_json=json.dumps({"summary": summary, "status": status_info}) if (summary or status_info) else None
+            )
+            db.add(metrics)
+            db.commit()
+        except Exception as e:
+            logger.error(f"Pi-hole collection failed: {e}")
+        finally:
+            db.close()
 
-    async def _collect_pihole(self, db: Session):
-        summary = await self.pihole.get_summary()
-        status_info = await self.pihole.get_status()
-        
-        status = "ONLINE" if (status_info and status_info.get("status") == "enabled") else "OFFLINE"
-        metrics = DNSMetrics(
-            service_type="pihole",
-            status=status,
-            query_count=summary.get("dns_queries_today", 0) if summary else 0,
-            block_count=summary.get("ads_blocked_today", 0) if summary else 0,
-            metrics_json=json.dumps(summary) if summary else None
-        )
-        db.add(metrics)
-        db.commit()
-
-    async def _collect_unbound(self, db: Session):
-        res = await self.unbound.get_metrics()
-        metrics = DNSMetrics(
-            service_type="unbound",
-            status=res.get("status", "UNKNOWN"),
-            latency_ms=res.get("latency_ms"),
-            metrics_json=json.dumps(res)
-        )
-        db.add(metrics)
-        db.commit()
+    async def _collect_unbound(self):
+        db = SessionLocal()
+        try:
+            res = await self.unbound.get_metrics()
+            metrics = DNSMetrics(
+                service_type="unbound",
+                status=res.get("status", "UNKNOWN"),
+                latency_ms=res.get("latency_ms"),
+                metrics_json=json.dumps(res)
+            )
+            db.add(metrics)
+            db.commit()
+        except Exception as e:
+            logger.error(f"Unbound collection failed: {e}")
+        finally:
+            db.close()

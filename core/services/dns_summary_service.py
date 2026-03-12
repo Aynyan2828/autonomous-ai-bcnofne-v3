@@ -27,30 +27,40 @@ class DNSSummaryService:
                     "status": latest.status,
                     "query_count": latest.query_count,
                     "block_count": latest.block_count,
-                    "latency": latest.latency_ms
+                    "latency": latest.latency_ms,
+                    "last_checked": latest.created_at
                 }
             else:
-                results[s] = {"status": "OFFLINE", "query_count": 0, "block_count": 0}
+                results[s] = {"status": "OFFLINE", "query_count": 0, "block_count": 0, "last_checked": None}
                 
         return results
 
     @staticmethod
     def format_status_report(stats: dict) -> str:
         """博多弁でのDNSステータスレポート作成"""
-        ag = stats.get("adguard", {})
-        ph = stats.get("pihole", {})
-        ub = stats.get("unbound", {})
-        
+        def format_service(name, data):
+            status_emoji = "✅" if data['status'] == "ONLINE" else "❌"
+            time_str = data['last_checked'].astimezone().strftime('%H:%M') if data['last_checked'] else "未取得"
+            line = f"・{name}: {status_emoji} {data['status']} ({time_str})"
+            if data['status'] == "ONLINE":
+                if name == "Unbound":
+                    line += f" 応答: {data.get('latency', 0):.1f}ms"
+                else:
+                    line += f" ブロック: {data['block_count']}件"
+            return line
+
+        ag_line = format_service("AdGuard Home", stats.get("adguard", {}))
+        ph_line = format_service("Pi-hole", stats.get("pihole", {}))
+        ub_line = format_service("Unbound", stats.get("unbound", {}))
+
         ja = (f"DNS基盤の状況ば報告するね、マスター！🚩\n\n"
-              f"・AdGuard Home: {ag['status']} (ブロック: {ag['block_count']}件)\n"
-              f"・Pi-hole: {ph['status']} (ブロック: {ph['block_count']}件)\n"
-              f"・Unbound: {ub['status']}" + (f" (応答: {ub['latency']:.1f}ms)" if ub.get('latency') else "") + "\n\n"
-              f"今日も安全なネット航海ばい！✨")
+              f"{ag_line}\n"
+              f"{ph_line}\n"
+              f"{ub_line}\n\n"
+              f"データは5分おきに自動でチェックしとるよ。今日も安全なネット航海ばい！✨")
               
         en = (f"Reporting DNS infrastructure status, Master! 🚩\n\n"
-              f"- AdGuard Home: {ag['status']} (Blocked: {ag['block_count']})\n"
-              f"- Pi-hole: {ph['status']} (Blocked: {ph['block_count']})\n"
-              f"- Unbound: {ub['status']}" + (f" (Latency: {ub['latency']:.1f}ms)" if ub.get('latency') else "") + "\n\n"
+              f"Check results from around the system. Auto-updated every 5 mins.\n\n"
               f"Safe sailing today! ✨")
               
         return format_bilingual(ja, en)
