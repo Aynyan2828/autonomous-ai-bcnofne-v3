@@ -1,6 +1,7 @@
 from .base import DNSClientBase, logger
 from typing import Dict, Any, Optional
 import base64
+import httpx
 
 class AdGuardClient(DNSClientBase):
     """AdGuard Home REST API クライアント"""
@@ -25,10 +26,10 @@ class AdGuardClient(DNSClientBase):
     async def get_status(self) -> Any:
         return await self._get_with_auth("control/status")
 
-    async def get_history(self, limit: int = 10) -> Optional[Dict[str, Any]]:
+    async def get_history(self, limit: int = 10) -> Any:
         """クエリ履歴の取得"""
-        return await self._get("control/query_log", params={"limit": limit}, headers=self.headers)
+        return await self._get_with_auth("control/query_log", params={"limit": limit})
     
-    async def get_filtering_config(self) -> Optional[Dict[str, Any]]:
+    async def get_filtering_config(self) -> Any:
         """フィルタリング設定の取得"""
-        return await self._get("control/filtering/status", headers=self.headers)
+        return await self._get_with_auth("control/filtering/status")

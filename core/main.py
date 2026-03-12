@@ -563,8 +563,14 @@ async def handle_dns_status(db: Session, reply_token: str):
     from core.services.dns_metrics_collector import DNSMetricsCollector
     
     # 手動チェック時は、背景ループを待たずに最新情報を取得する
-    collector = DNSMetricsCollector()
-    await collector.collect_all()
+    try:
+        collector = DNSMetricsCollector()
+        # タイムアウト等で LINE の返信が遅れないよう、念のためタイムアウト制限を設けるか
+        # ここでは例外で止まらないことを優先
+        await asyncio.wait_for(collector.collect_all(), timeout=15.0)
+    except Exception as e:
+        logger.error(f"Manual DNS collection failed: {e}")
+        # 収集に失敗しても、DBにある過去（または一部）のデータで返信は試みる
     
     stats = DNSSummaryService.get_daily_stats(db)
     report = DNSSummaryService.format_status_report(stats)
