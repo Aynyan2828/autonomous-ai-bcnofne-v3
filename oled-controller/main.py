@@ -20,17 +20,31 @@ logger = ShipLogger("oled-controller")
 
 # OLED & Fan dependencies
 try:
-    import RPi.GPIO as GPIO
+    import pigpio
+    from .fan_controller import FanController
     import board
     import busio
     import adafruit_ssd1306
     from PIL import Image, ImageDraw, ImageFont
     HARDWARE_AVAILABLE = True
+except ImportError:
+    # Try absolute import for local testing or different path structures
+    try:
+        import pigpio
+        from fan_controller import FanController
+        import board
+        import busio
+        import adafruit_ssd1306
+        from PIL import Image, ImageDraw, ImageFont
+        HARDWARE_AVAILABLE = True
+    except Exception as e:
+        import traceback
+        HARDWARE_AVAILABLE = False
+        print(f"[OLED/FAN] Hardware libraries not available. Running in stub mode. ({e})")
+        traceback.print_exc()
 except Exception as e:
-    import traceback
     HARDWARE_AVAILABLE = False
-    print(f"[OLED/FAN] Hardware libraries not available. Running in stub mode. ({e})")
-    traceback.print_exc()
+    print(f"[OLED/FAN] Hardware error. ({e})")
 
 def clean_text(text: str) -> str:
     """Keep printable characters including Japanese (UTF-8)."""
@@ -44,9 +58,10 @@ app = FastAPI(title="BCNOFNe OLED & Fan Controller")
 # Configuration Constants
 OLED_WIDTH = 128
 OLED_HEIGHT = 64
-FAN_PIN = 14
-TEMP_THRESHOLD_HIGH = 60.0 # Fan ON
-TEMP_THRESHOLD_LOW = 45.0  # Fan OFF
+FAN_PWM_PIN = 18
+FAN_TACH_PIN = 23
+TEMP_THRESHOLD_HIGH = 60.0 # 100% Duty
+TEMP_THRESHOLD_LOW = 40.0  # 30% Duty
 
 # shipOS Mode Mapping (Naval Terms)
 SHIP_MODE_DISPLAY = {
@@ -98,7 +113,9 @@ INTERNAL_STATE_FACE = {
 }
 
 # Runtime Variables
-fan_is_on = False
+fan_ctrl = None
+pi = None
+fan_status = {"duty": 0, "rpm": 0}
 oled_display = None
 scroll_message = ""
 scroll_pos = OLED_WIDTH
@@ -241,15 +258,20 @@ def show_shutdown_animation():
     oled_display.show()
 
 def setup_hardware():
-    global fan_is_on, oled_display
+    global fan_ctrl, oled_display, pi
     if not HARDWARE_AVAILABLE:
         return
 
-    # Fan Setup
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(FAN_PIN, GPIO.OUT)
-    GPIO.output(FAN_PIN, GPIO.LOW)
-    fan_is_on = False
+    # pigpio Setup
+    try:
+        pi = pigpio.pi()
+        if not pi.connected:
+            logger.warning("OLED/FAN: pigpiod not running on host. Fan control will be stubbed.")
+        else:
+            fan_ctrl = FanController(pi, pwm_pin=FAN_PWM_PIN, tach_pin=FAN_TACH_PIN)
+            logger.info("OLED/FAN: FanController initialized with pigpio.")
+    except Exception as e:
+        logger.error(f"OLED/FAN: Failed to initialize pigpio/fan: {e}")
 
     # OLED Setup
     try:
@@ -272,16 +294,16 @@ def get_cpu_temp():
         return 0.0
 
 def control_fan(temp):
-    global fan_is_on
+    global fan_ctrl, fan_status
     if not HARDWARE_AVAILABLE:
         return
 
-    if temp > TEMP_THRESHOLD_HIGH and not fan_is_on:
-        GPIO.output(FAN_PIN, GPIO.HIGH)
-        fan_is_on = True
-    elif temp < TEMP_THRESHOLD_LOW and fan_is_on:
-        GPIO.output(FAN_PIN, GPIO.LOW)
-        fan_is_on = False
+    if fan_ctrl:
+        try:
+            fan_ctrl.update(temp)
+            fan_status = fan_ctrl.get_status()
+        except Exception as e:
+            logger.error(f"OLED/FAN: Fan control error: {e}")
 
 def get_system_state_val(db: Session, key: str, default: str) -> str:
     # 別プロセス（core等）が書き込んだ最新の値を読むため、キャッシュを破棄してからクエリ
@@ -417,11 +439,11 @@ def update_oled(db: Session):
     # Line 4: Hardwares (TEMP/DISK)
     draw.text((0, 33), f"TEMP:{temp:.0f}C DISK:{disk_pct:.0f}%", font=font, fill=255)
     
-    # Line 5: Scrolling message (LAN/TS IPs)
-    draw.text((scroll_pos, 44), scroll_message, font=font, fill=255)
+    # Line 5: Fan status (Duty/RPM)
+    draw.text((0, 44), f"FAN:{fan_status['duty']}% RPM:{fan_status['rpm']}", font=font, fill=255)
     
-    # Line 6: Fixed Status
-    draw.text((0, 55), "STATUS: ONLINE", font=font, fill=255)
+    # Line 6: Scrolling message (LAN/TS IPs)
+    draw.text((scroll_pos, 55), scroll_message, font=font, fill=255)
 
     
     # スクロール位置更新 (IP行)
@@ -448,14 +470,17 @@ async def hardware_loop():
             temp = get_cpu_temp()
             control_fan(temp)
             update_oled(db)
-            db.expire_all()  # 別プロセスの書き込みを確実に読む
-            await asyncio.sleep(0.1) # 10FPS程度のスクロールを維持
+            db.expire_all()
+            await asyncio.sleep(0.1)
     except Exception as e:
-        print(f"Hardware loop error: {e}")
+        logger.error(f"Hardware loop error: {e}")
     finally:
         db.close()
         if HARDWARE_AVAILABLE:
-            GPIO.cleanup()
+            if fan_ctrl:
+                fan_ctrl.stop()
+            if pi:
+                pi.stop()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -466,7 +491,10 @@ async def lifespan(app: FastAPI):
     task.cancel()
     if HARDWARE_AVAILABLE:
         show_shutdown_animation()
-        GPIO.cleanup()
+        if fan_ctrl:
+            fan_ctrl.stop()
+        if pi:
+            pi.stop()
 
 app.router.lifespan_context = lifespan
 
@@ -476,6 +504,7 @@ def health_check():
         "status": "ok",
         "service": "oled-controller",
         "hardware_present": HARDWARE_AVAILABLE,
-        "fan_on": fan_is_on,
+        "fan_duty": fan_status.get("duty", 0),
+        "fan_rpm": fan_status.get("rpm", 0),
         "cpu_temp": get_cpu_temp()
     }
