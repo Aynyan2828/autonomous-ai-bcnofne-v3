@@ -13,18 +13,23 @@ class PiholeClient(DNSClientBase):
         params = {"summaryRaw": 1}
         if self.api_token:
             params["auth"] = self.api_token
-        return await self._get("admin/api.php", params=params)
+        
+        # もし base_url にすでに /admin が含まれていたら二重にならないようにする
+        endpoint = "api.php" if self.base_url.endswith("/admin") else "admin/api.php"
+        return await self._get(endpoint, params=params)
 
     async def get_top_items(self) -> Optional[Dict[str, Any]]:
         """上位クエリ/ドメインの取得"""
         params = {"topItems": 10}
         if self.api_token:
             params["auth"] = self.api_token
-        return await self._get("admin/api.php", params=params)
+        endpoint = "api.php" if self.base_url.endswith("/admin") else "admin/api.php"
+        return await self._get(endpoint, params=params)
 
     async def get_status(self) -> Optional[Dict[str, Any]]:
         """稼働状態の取得"""
         params = {"status": 1}
         if self.api_token:
             params["auth"] = self.api_token
-        return await self._get("admin/api.php", params=params)
+        endpoint = "api.php" if self.base_url.endswith("/admin") else "admin/api.php"
+        return await self._get(endpoint, params=params)
