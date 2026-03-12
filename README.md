@@ -55,6 +55,7 @@ The core personality, **AYN**, is not a static chatbot. She is an AI lifeform wi
 *   🌐 **Browser Automation / ブラウザ自動操作**: Powered by Playwright for autonomous web research. / Playwrightによる自律的なウェブ調査能力。
 *   🛡️ **Billing Guard / 課金安全装置**: A fail-safe system to prevent unexpected API costs. / 予期せぬAPIコストの暴走を防ぐフェイルセーフ機構。
 *   📖 **Autonomous Diary / 航海日誌自動生成**: AI generates daily ship logs based on system events and interactions. / システムイベントや対話に基づき、AIが日々の航海日誌を自動生成。
+*   📡 **DNS Watchtower / DNS統合監視**: Unified monitoring of AdGuard Home, Pi-hole, and Unbound with AI summaries. / AdGuard Home, Pi-hole, Unboundを統合監視し、AIが日次要約。
 
 ---
 
@@ -89,11 +90,20 @@ graph TB
         Disp[OLED SSD1306]
     end
 
+    subgraph "DNS Guard"
+        AGH[AdGuard Home]
+        PH[Pi-hole]
+        UB[Unbound]
+    end
+
     LINE <--> LG <--> Core
     Core <--> MS
     Core <--> DA
     DA --> GitHub
     Core --> OLED --> Disp
+    Core -- Monitoring --> AGH
+    Core -- Monitoring --> PH
+    Core -- Health --> UB
 ```
 
 ---

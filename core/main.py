@@ -265,14 +265,30 @@ async def proactive_thinking_loop():
     finally:
         db.close()
 
+async def dns_metrics_loop():
+    """DNSメトリクスの定期収集ループ (5分間隔)"""
+    from core.services.dns_metrics_collector import DNSMetricsCollector
+    collector = DNSMetricsCollector()
+    interval = int(os.getenv("DNS_METRICS_INTERVAL", "300"))
+    
+    await asyncio.sleep(30) # 起動直後は少し待つ
+    while True:
+        try:
+            await collector.collect_all()
+            # logger.info("DNS metrics collected successfully.")
+        except Exception as e:
+            logger.error(f"DNS collection error: {e}")
+        await asyncio.sleep(interval)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- Startup Sequence ---
     logger.info("====================================")
     logger.info(" BCNOFNe v3 Starting (Outward Bound) ")
     logger.info("====================================")
-    
+    init_db()
     thinking_task = asyncio.create_task(proactive_thinking_loop())
+    asyncio.create_task(dns_metrics_loop())
     asyncio.create_task(register_version_memory_on_startup())
     
     # 2. IP Address Discovery
@@ -542,21 +558,35 @@ async def handle_diary_command(reply_token: str):
         except Exception as e:
             await send_reply(reply_token, format_bilingual(f"日誌サービスと通信できんやった: {e}", f"Failed to communicate with diary-service: {e}"))
 
+async def handle_dns_status(db: Session, reply_token: str):
+    from core.services.dns_summary_service import DNSSummaryService
+    stats = DNSSummaryService.get_daily_stats(db)
+    report = DNSSummaryService.format_status_report(stats)
+    await send_reply(reply_token, report)
+
 async def handle_activity_report(db: Session, reply_token: str):
     try:
+        from core.services.dns_summary_service import DNSSummaryService
+        dns_stats = DNSSummaryService.get_daily_stats(db)
+        
         logs = db.query(SystemLog).order_by(SystemLog.created_at.desc()).limit(50).all()
-        if not logs:
-            await send_reply(reply_token, format_bilingual("今日はまだ静かな航海が続いてるみたいたい。特に目立った活動はなかよ。", "It seems like a quiet voyage today. No notable activities."))
-            return
-
         log_texts = [f"[{l.service_name}] {l.message}" for l in reversed(logs)]
         log_summary_input = "\n".join(log_texts)
 
+        # DNS 統計の要約
+        dns_summary = ""
+        if dns_stats:
+            dns_summary = "\n【DNS基盤統計】\n"
+            for s, data in dns_stats.items():
+                dns_summary += f"- {s}: {data['status']} (クエリ: {data['query_count']}, ブロック: {data['block_count']})\n"
+
         prompt = f"""
-あなたは AYN です。以下のシステムログを読み取り、マスターから「今日何した？」と聞かれたことに対して、博多弁で要約して答えてください。
+あなたは AYN です。以下のシステムログと DNS 統計を読み取り、マスターから「今日何した？」と聞かれたことに対して、博多弁で可愛く要約して答えてください。
 必ず「日本語\n英語」のバイリンガルフォーマットで出力してください。
+
 【システムログ】
 {log_summary_input}
+{dns_summary}
 """
         response = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
@@ -773,6 +803,9 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
     elif text.startswith("詳細 "):
         prop_id = text.split()[1].upper()
         await handle_proposal_detail(payload.reply_token, prop_id)
+        return
+    elif text in ["DNS状況", "DNS状態", "DNS統計", "AdGuard状態", "Pi-hole状態", "Unbound状態"]:
+        await handle_dns_status(db, payload.reply_token)
         return
 
     # Normal AI Conversation

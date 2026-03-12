@@ -140,6 +140,26 @@ class GoalHistory(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
 
+class DNSMetrics(Base):
+    """DNS基盤（AdGuard, Pi-hole, Unbound）の統計・監視データ"""
+    __tablename__ = "dns_metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    service_type = Column(String, index=True) # "adguard", "pihole", "unbound"
+    status = Column(String, default="UNKNOWN") # "ONLINE", "OFFLINE", "ERROR"
+    
+    # 統計データ (JSON形式で柔軟に保存)
+    metrics_json = Column(Text, nullable=True) 
+    
+    # 代表的な数値（クエリ数、ブロック数など）はカラムとしても保持すると集計が楽
+    query_count = Column(Integer, default=0)
+    block_count = Column(Integer, default=0)
+    
+    # 応答速度 (ms)
+    latency_ms = Column(Float, nullable=True)
+    
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
 class EvolutionLog(Base):
     """重大なアップデートや自己進化の履歴 (Evolution Log)"""
     __tablename__ = "evolution_logs"
