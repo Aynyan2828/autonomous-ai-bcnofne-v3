@@ -804,7 +804,7 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         prop_id = text.split()[1].upper()
         await handle_proposal_detail(payload.reply_token, prop_id)
         return
-    elif text in ["DNS状況", "DNS状態", "DNS統計", "AdGuard状態", "Pi-hole状態", "Unbound状態"]:
+    elif text in ["dns状況", "dns状態", "dns統計", "adguard状態", "pi-hole状態", "unbound状態", "dns", "adguard", "pihole"]:
         await handle_dns_status(db, payload.reply_token)
         return
 
