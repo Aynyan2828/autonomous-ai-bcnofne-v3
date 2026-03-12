@@ -264,12 +264,22 @@ def setup_hardware():
 
     # pigpio Setup
     try:
-        pi = pigpio.pi()
+        # Docker環境からホストの pigpiod に接続するための設定
+        # 1. 環境変数を優先 2. 特殊なホスト名 3. デフォルト
+        pigpio_host = os.getenv("PIGPIO_ADDR", "localhost")
+        
+        pi = pigpio.pi(pigpio_host)
+        
+        # もし localhost で接続失敗し、かつ環境変数が未設定なら、Docker Gateway を試行
+        if not pi.connected and pigpio_host == "localhost":
+            logger.info("OLED/FAN: Retrying pigpiod on 172.17.0.1 (Docker bridge)...")
+            pi = pigpio.pi("172.17.0.1")
+
         if not pi.connected:
-            logger.warning("OLED/FAN: pigpiod not running on host. Fan control will be stubbed.")
+            logger.warning("OLED/FAN: pigpiod not running or unreachable. Fan control will be stubbed.")
         else:
             fan_ctrl = FanController(pi, pwm_pin=FAN_PWM_PIN, tach_pin=FAN_TACH_PIN)
-            logger.info("OLED/FAN: FanController initialized with pigpio.")
+            logger.info(f"OLED/FAN: FanController initialized with pigpio on {pi._host}.")
     except Exception as e:
         logger.error(f"OLED/FAN: Failed to initialize pigpio/fan: {e}")
 

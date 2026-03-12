@@ -51,9 +51,10 @@ sudo systemctl start pigpiod
 ```ini
 [Service]
 ExecStart=
-ExecStart=/usr/bin/pigpiod -l -g
+ExecStart=/usr/bin/pigpiod -g
 ```
-> `-l` はローカルアクセスのみ、`-g` は全てのユーザーに許可する例です。
+> [!NOTE]
+> デフォルトの `-l` オプションがあると Docker コンテナから接続できません。コンテナ外（ホスト）からの接続を許可するために `-l` は外してください。
 
 ### BCNOFNe サービス全体の起動例
 ```ini
