@@ -34,9 +34,9 @@ class FanController:
             self.pi.set_pull_up_down(self.tach_pin, pigpio.PUD_UP)
             self.cb = self.pi.callback(self.tach_pin, pigpio.FALLING_EDGE, self._tach_callback)
             
-            logging.info(f"FanController: Initialized on PWM={pwm_pin}, TACH={tach_pin}")
+            print(f"[FAN] FanController: Initialized on BCM PWM={pwm_pin}, TACH={tach_pin}")
         else:
-            logging.warning("FanController: pigpio not connected. Running in stub mode.")
+            print("[FAN] FanController: pigpio not connected. Running in stub mode.")
 
     def _tach_callback(self, gpio, level, tick):
         self._pulses += 1
@@ -79,8 +79,15 @@ class FanController:
             # RPM = (pulses / 2) * (60 / elapsed)
             # 2 pulses per revolution is standard for PC fans.
             self.rpm = int((self._pulses / 2) * (60 / elapsed))
+            
+            # デバッグ出力: ログで見えるように print を使用
             if self._pulses > 0:
-                logging.debug(f"FanController: Measured {self._pulses} pulses -> {self.rpm} RPM")
+                print(f"[FAN] Measured {self._pulses} pulses in {elapsed:.2f}s -> {self.rpm} RPM")
+            elif self.target_duty > 30:
+                # Duty が出てるのにパルスが0なら異常
+                level = self.pi.read(self.tach_pin)
+                print(f"[FAN] No pulses detected. Current pin level on BCM {self.tach_pin} is {level}")
+
             self._pulses = 0
             self._last_rpm_time = now
 
