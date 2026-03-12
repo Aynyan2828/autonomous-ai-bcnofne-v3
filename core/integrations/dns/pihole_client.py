@@ -35,8 +35,8 @@ class PiholeClient(DNSClientBase):
                     else:
                         return data
                 elif resp.status_code == 400:
-                    # 400 の理由をキャプチャ
-                    text = resp.text[:100]
+                    # 400 の理由をより長くキャプチャ
+                    text = resp.text[:200]
                     logger.warning(f"Pi-hole 400 Error: {text}")
                     if "auth" in params:
                         # トークンなしで試す（一部の統計はトークン不要な場合があるため）

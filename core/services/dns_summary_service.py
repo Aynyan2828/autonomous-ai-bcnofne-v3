@@ -78,7 +78,7 @@ class DNSSummaryService:
                 elif "401" in err or "403" in err:
                     line += " -> 認証失敗(User/Pass/Tokenを確認)"
                 else:
-                    line += f" -> {err[:30]}..."
+                    line += f" -> {err[:100]}"
             return line
 
         ag_line = format_service("AdGuard Home", stats.get("adguard", {}))

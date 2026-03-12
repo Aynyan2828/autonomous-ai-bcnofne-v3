@@ -7,16 +7,25 @@ class AdGuardClient(DNSClientBase):
     """AdGuard Home REST API クライアント"""
     def __init__(self, base_url: str, username: str, password: str, timeout: float = 5.0):
         super().__init__(base_url.strip().rstrip("/"), timeout)
-        self.auth = httpx.BasicAuth(username.strip(), password.strip())
+        # 全角文字対応のため、明示的に UTF-8 でエンコードして Basic 認証を構築
+        u = username.strip()
+        p = password.strip()
+        auth_bytes = f"{u}:{p}".encode("utf-8")
+        auth_b64 = base64.b64encode(auth_bytes).decode("ascii")
+        self.headers = {"Authorization": f"Basic {auth_b64}"}
 
     async def _get_with_auth(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        async with httpx.AsyncClient(timeout=self.timeout, auth=self.auth) as client:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
-                resp = await client.get(url, params=params)
+                resp = await client.get(url, params=params, headers=self.headers)
                 resp.raise_for_status()
                 return resp.json()
             except Exception as e:
+                # 401 の場合は認証失敗として詳細を出す
+                if hasattr(e, "response") and e.response is not None:
+                    if e.response.status_code == 401:
+                        return {"error": "401 Unauthorized (Password/User mismatch)", "url": url}
                 logger.error(f"AdGuard GET failed for {url}: {e}")
                 return {"error": str(e), "url": url}
 
