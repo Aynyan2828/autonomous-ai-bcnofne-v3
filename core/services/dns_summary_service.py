@@ -75,8 +75,6 @@ class DNSSummaryService:
                 err = data['error_info']
                 if "ConnectError" in err or "Connection refused" in err:
                     line += " -> 接続失敗(Port/IPを確認)"
-                elif "401" in err or "403" in err:
-                    line += " -> 認証失敗(User/Pass/Tokenを確認)"
                 else:
                     line += f" -> {err[:100]}"
             return line

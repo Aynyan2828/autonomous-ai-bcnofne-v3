@@ -4,7 +4,7 @@ import base64
 import httpx
 
 class AdGuardClient(DNSClientBase):
-    """AdGuard Home REST API クライアント"""
+    """AdGuard Home REST API クライアント (全角パスワード対応版)"""
     def __init__(self, base_url: str, username: str, password: str, timeout: float = 5.0):
         super().__init__(base_url.strip().rstrip("/"), timeout)
         # 全角文字対応のため、明示的に UTF-8 でエンコードして Basic 認証を構築
@@ -19,13 +19,17 @@ class AdGuardClient(DNSClientBase):
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
                 resp = await client.get(url, params=params, headers=self.headers)
-                resp.raise_for_status()
-                return resp.json()
+                if resp.status_code == 200:
+                    return resp.json()
+                
+                # 失敗時はステータスコードとボディの冒頭を返す
+                body_peek = resp.text[:200]
+                return {
+                    "error": f"HTTP {resp.status_code}",
+                    "body": body_peek,
+                    "url": url
+                }
             except Exception as e:
-                # 401 の場合は認証失敗として詳細を出す
-                if hasattr(e, "response") and e.response is not None:
-                    if e.response.status_code == 401:
-                        return {"error": "401 Unauthorized (Password/User mismatch)", "url": url}
                 logger.error(f"AdGuard GET failed for {url}: {e}")
                 return {"error": str(e), "url": url}
 
@@ -36,9 +40,7 @@ class AdGuardClient(DNSClientBase):
         return await self._get_with_auth("control/status")
 
     async def get_history(self, limit: int = 10) -> Any:
-        """クエリ履歴の取得"""
         return await self._get_with_auth("control/query_log", params={"limit": limit})
     
     async def get_filtering_config(self) -> Any:
-        """フィルタリング設定の取得"""
         return await self._get_with_auth("control/filtering/status")

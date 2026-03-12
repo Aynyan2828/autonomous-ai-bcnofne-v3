@@ -10,10 +10,12 @@ class PiholeClient(DNSClientBase):
         super().__init__(base, timeout)
         self.password = password.strip() if password else None
         self._sid: Optional[str] = None
+        self._last_error: Optional[str] = None
 
     async def _login(self, client: httpx.AsyncClient) -> bool:
         """SID を取得する (v6 認証)"""
         if not self.password:
+            self._last_error = "Password not set in .env"
             return False
         
         try:
@@ -22,79 +24,61 @@ class PiholeClient(DNSClientBase):
             if resp.status_code == 200:
                 data = resp.json()
                 self._sid = data.get("session", {}).get("sid")
-                return self._sid is not None
+                if self._sid:
+                    self._last_error = None
+                    return True
+                else:
+                    self._last_error = f"Login 200 but no SID in: {resp.text[:50]}"
+            else:
+                self._last_error = f"Login failed: HTTP {resp.status_code} - {resp.text[:100]}"
         except Exception as e:
+            self._last_error = f"Login exception: {str(e)}"
             logger.error(f"Pi-hole v6 login failed: {e}")
         return False
 
     async def get_summary(self) -> Any:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            # v6 認証
             if not self._sid:
-                await self._login(client)
+                if not await self._login(client):
+                    return {"error": self._last_error}
             
             url = f"{self.base_url}/api/stats/summary"
-            params = {}
-            if self._sid:
-                params["sid"] = self._sid
-            
             try:
-                resp = await client.get(url, params=params)
+                resp = await client.get(url, params={"sid": self._sid})
                 if resp.status_code == 200:
                     return resp.json()
                 
-                # 401/403 なら再ログイン
+                # 401/403 なら再ログイン試行
                 if resp.status_code in [401, 403]:
                     if await self._login(client):
-                        params["sid"] = self._sid
-                        resp = await client.get(url, params=params)
+                        resp = await client.get(url, params={"sid": self._sid})
                         if resp.status_code == 200:
                             return resp.json()
                 
-                return {"error": f"Pi-hole v6 summary failed: {resp.status_code}", "body": resp.text[:100]}
+                return {"error": f"HTTP {resp.status_code}", "body": resp.text[:100]}
             except Exception as e:
-                # v5 互換フォールバック (念のため)
-                v5_url = f"{self.base_url}/admin/api.php?summaryRaw=1"
-                try:
-                    resp5 = await client.get(v5_url)
-                    if resp5.status_code == 200:
-                        return resp5.json()
-                except:
-                    pass
                 return {"error": str(e), "url": url}
 
     async def get_status(self) -> Any:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             if not self._sid:
-                await self._login(client)
+                if not await self._login(client):
+                    return {"error": self._last_error}
             
-            # v6 では /api/dns/blocking でステータス取得
             url = f"{self.base_url}/api/dns/blocking"
-            params = {}
-            if self._sid:
-                params["sid"] = self._sid
-                
             try:
-                resp = await client.get(url, params=params)
+                resp = await client.get(url, params={"sid": self._sid})
                 if resp.status_code == 200:
                     data = resp.json()
-                    # v5 互換の形式に変換
                     return {"status": "enabled" if data.get("blocking", False) else "disabled"}
                 
-                # v5 互換フォールバック
-                v5_url = f"{self.base_url}/admin/api.php?status=1"
-                resp5 = await client.get(v5_url)
-                if resp5.status_code == 200:
-                    return resp5.json()
-                    
-                return {"error": f"Pi-hole v6 status failed: {resp.status_code}"}
+                if resp.status_code in [401, 403]:
+                    if await self._login(client):
+                        resp = await client.get(url, params={"sid": self._sid})
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            return {"status": "enabled" if data.get("blocking", False) else "disabled"}
+
+                return {"error": f"HTTP {resp.status_code}", "body": resp.text[:100]}
             except Exception as e:
-                # v5 互換フォールバック
-                v5_url = f"{self.base_url}/admin/api.php?status=1"
-                try:
-                    resp5 = await client.get(v5_url)
-                    if resp5.status_code == 200:
-                        return resp5.json()
-                except:
-                    pass
                 return {"error": str(e)}
