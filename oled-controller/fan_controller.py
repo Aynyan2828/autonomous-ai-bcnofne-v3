@@ -79,6 +79,8 @@ class FanController:
             # RPM = (pulses / 2) * (60 / elapsed)
             # 2 pulses per revolution is standard for PC fans.
             self.rpm = int((self._pulses / 2) * (60 / elapsed))
+            if self._pulses > 0:
+                logging.debug(f"FanController: Measured {self._pulses} pulses -> {self.rpm} RPM")
             self._pulses = 0
             self._last_rpm_time = now
 
