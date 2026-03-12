@@ -142,7 +142,7 @@ def get_memory_summary(db: Session = Depends(get_db)):
         memories = db.query(Memory).filter(Memory.layer.in_(priority_layers)).order_by(Memory.importance.desc(), Memory.created_at.desc()).limit(5).all()
         
         # 通常の記憶も追加
-        recent_memories = db.query(Memory).filter(Memory.layer == MemoryLayer.EPISODIC.value).order_by(Memory.created_at.desc()).limit(5).all()
+        recent_memories = db.query(Memory).filter(Memory.layer.in_([MemoryLayer.EPISODIC.value, MemoryLayer.WORKING.value])).order_by(Memory.created_at.desc()).limit(10).all()
         memories.extend(recent_memories)
 
         if not memories:
