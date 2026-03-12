@@ -576,6 +576,12 @@ async def handle_dns_status(db: Session, reply_token: str):
     report = DNSSummaryService.format_status_report(stats)
     await send_reply(reply_token, report)
 
+async def handle_dns_voyage_log(db: Session, reply_token: str):
+    from core.services.dns_summary_service import DNSSummaryService
+    stats = DNSSummaryService.get_daily_stats(db)
+    report = DNSSummaryService.format_voyage_log(stats)
+    await send_reply(reply_token, report)
+
 async def handle_activity_report(db: Session, reply_token: str):
     try:
         from core.services.dns_summary_service import DNSSummaryService
@@ -585,12 +591,10 @@ async def handle_activity_report(db: Session, reply_token: str):
         log_texts = [f"[{l.service_name}] {l.message}" for l in reversed(logs)]
         log_summary_input = "\n".join(log_texts)
 
-        # DNS 統計の要約
-        dns_summary = ""
+        # DNS 航海ログの取得
+        dns_voyage_log = ""
         if dns_stats:
-            dns_summary = "\n【DNS基盤統計】\n"
-            for s, data in dns_stats.items():
-                dns_summary += f"- {s}: {data['status']} (クエリ: {data['query_count']}, ブロック: {data['block_count']})\n"
+            dns_voyage_log = DNSSummaryService.format_voyage_log(dns_stats)
 
         prompt = f"""
 あなたは AYN です。以下のシステムログと DNS 統計を読み取り、マスターから「今日何した？」と聞かれたことに対して、博多弁で可愛く要約して答えてください。
@@ -598,7 +602,9 @@ async def handle_activity_report(db: Session, reply_token: str):
 
 【システムログ】
 {log_summary_input}
-{dns_summary}
+
+【DNS 航海ログ】
+{dns_voyage_log}
 """
         response = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
@@ -791,6 +797,9 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         return
     elif "今日何した" in text:
         await handle_activity_report(db, payload.reply_token)
+        return
+    elif text == "dns航海ログ" or text == "dnsログ":
+        await handle_dns_voyage_log(db, payload.reply_token)
         return
     elif text == "同期":
         await handle_sync_command(payload.reply_token)

@@ -94,3 +94,40 @@ class DNSSummaryService:
               f"Safe sailing today! ✨")
               
         return format_bilingual(ja, en)
+    @staticmethod
+    def format_voyage_log(stats: dict) -> str:
+        """今日のDNS航海ログ（統計要約）を作成"""
+        # 各種数値の抽出
+        ag = stats.get("adguard", {})
+        ph = stats.get("pihole", {})
+        ub = stats.get("unbound", {})
+
+        ag_blocks = ag.get("block_count", 0)
+        ph_queries = ph.get("query_count", 0)
+        ph_blocks = ph.get("block_count", 0)
+        ph_rate = (ph_blocks / ph_queries * 100) if ph_queries > 0 else 0
+        ub_queries = ub.get("query_count", 0) # 現状は監視回数に近いが将来的に拡張可能
+
+        ja = (f"DNS航海ログ報告🚢🚩\n\n"
+              f"今日のDNSトラフィック状況たい！\n\n"
+              f"🛡️ AdGuard Home\n"
+              f"・ブロック件数: {ag_blocks}件\n\n"
+              f"📊 Pi-hole\n"
+              f"・総クエリ数: {ph_queries}件\n"
+              f"・ブロック率: {ph_rate:.1f}%\n\n"
+              f"🔗 Unbound\n"
+              f"・再帰クエリ監視: {ub_queries}回成功\n\n"
+              f"今日も安全なネット海域ば航海中たい！✨")
+
+        en = (f"DNS Voyage Log Report 🚢🚩\n\n"
+              f"Today's DNS traffic summary!\n\n"
+              f"🛡️ AdGuard Home\n"
+              f"- Blocked: {ag_blocks}\n\n"
+              f"📊 Pi-hole\n"
+              f"- Total Queries: {ph_queries}\n"
+              f"- Block Rate: {ph_rate:.1f}%\n\n"
+              f"🔗 Unbound\n"
+              f"- Recursive Check: {ub_queries} successes\n\n"
+              f"Sailing safely through the net today! ✨")
+
+        return format_bilingual(ja, en)
