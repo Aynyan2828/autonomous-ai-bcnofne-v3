@@ -1,101 +1,179 @@
-# BCNOFNe
+# BCNOFNe — Autonomous AI Operating System 🚢
+### Self-evolving AI lifeform running on Raspberry Pi.
 
-🚢 Autonomous AI Ship OS
-🧠 Self evolving AI system
-⚓ Raspberry Pi AI lifeform
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](https://github.com/Aynyan2828/autonomous-ai-bcnofne-v3)
+[![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%204B-red.svg)](https://www.raspberrypi.org/)
 
-## Overview / 概要
+**BCNOFNe** (pronounced *Bokunofune*) is an experimental AI operating system ("shipOS") where an AI agent doesn't just assist you—it lives, learns, and evolves its own source code.
 
-BCNOFNe は Raspberry Pi 上で動作する自律型 AI 船 OS です。
-BCNOFNe is an autonomous AI ship operating system running on Raspberry Pi.
+![Hero Image](docs/hero.png)
 
-壮大な世界観『DYOR島』を目指し航海するこのシステムは、Docker Compose を用いたマイクロサービスアーキテクチャで構成されており、自律的な進化と安全な航行をサポートします。
-Sailing towards the grand universe of "DYOR　Islands", this system is composed of a microservices architecture using Docker Compose, supporting autonomous evolution and safe navigation.
+---
 
-## Concept / コンセプト
+## ⚓ What is BCNOFNe?
 
-BCNOFNe は AI を単なるツールではなく「存在」として設計しています。
-BCNOFNe is designed not as a simple tool but as an AI entity.
+BCNOFNe is a containerized AI ecosystem designed for **Raspberry Pi 4B**. 
+In the lore of the "CryptoArk" project, it is the operating system of a virtual ship sailing toward the grand **DYOR Island**.
 
-マスター（ユーザー）と共に未知なる領域を探索し、日々の出来事から学び、成長する良きパートナーとなることを目指しています。
-It aims to be a good partner that explores unknown territories with the Master (user), learns from daily events, and grows together.
+The core personality, **AYN**, is not a static chatbot. She is an AI lifeform with:
+- **Autonomous Purpose**: Navigating the digital ocean with the Master (user).
+- **Self-Awareness**: Monitoring her own thermal state, billing, and system health.
+- **Evolutionary Drive**: Identifying bugs and proposing architectural improvements to her own code.
 
-## Architecture / アーキテクチャ
+---
 
-システム全体は複数のコンテナによる分散マイクロサービスとして構築されています。
-The entire system is built as a distributed microservice using multiple containers.
+## 📸 Screenshots & Demo
 
-各サービスは独立して動作し、REST API を介して協調し、データベースを用いて状態を共有します。
-Each service operates independently, coordinates via REST APIs, and shares state using a database.
+| System Architecture | GUI Dashboard |
+| :---: | :---: |
+| ![Architecture](docs/architecture.png) | (Dashboard Image Placeholder) |
 
-System architecture diagram
-システムアーキテクチャ図
+| AI Cognition (Logs) | Hardware (OLED/Fan) |
+| :---: | :---: |
+| (Log Image Placeholder) | (Hardware Image Placeholder) |
 
-## AI Lifeform Model / AI生命体モデル
+---
 
-AYN（あゆにゃん）は、単に質問に答えるだけではなく、自律的な思考サイクルを持っています。
-AYN is not just answering questions, but has an autonomous thinking cycle.
+## 🚀 Key Features
 
-感情の起伏、システム状態の把握、短期・長期記憶の統合により、文脈に沿った「生きている」反応を返します。
-Through emotional fluctuations, systemic awareness, and integration of short and long-term memory, it returns "living" responses perfectly aligned with the context.
+*   🤖 **Autonomous AI Agent (AYN)**: A proactive AI personality that thinks and acts beyond simple Q&A.
+*   🧠 **7-Layer Cognitive Memory**: A sophisticated memory architecture (Working to Mission layer).
+*   🔧 **Self-Improvement Engine**: Full-loop autonomous development (Observe → Proposal → Implementation).
+*   🐳 **Microservices Architecture**: 14+ independent Docker services for maximum modularity.
+*   📡 **Omni-Channel Gateway**: Integrated with **LINE** and **Discord** for remote commanding.
+*   🌐 **Browser Automation**: Powered by Playwright for autonomous web research.
+*   🛡️ **Billing Guard**: A fail-safe system to prevent unexpected API costs.
+*   📖 **Autonomous Diary**: AI generates daily ship logs based on system events and interactions.
 
-## Features / 機能
+---
 
-- **自律的思考と提案**: 日常のログから自身の改善案を提案します。
-- **Autonomous Thinking and Proposal**: Proposes self-improvement from daily logs.
-- **多層記憶システム**: 短期記憶から教訓まで、経験を蓄積します。
-- **Multi-layer Memory System**: Accumulates experience from short-term memory to lessons learned.
-- **ハードウェア統合**: GPIO、I2C を用いて OLED ディスプレイやファンを制御します。
-- **Hardware Integration**: Controls OLED display and fans using GPIO and I2C.
-- **マルチプラットフォーム連携**: LINE や Discord を通じた非同期コミュニケーション。
-- **Cross-platform Integration**: Asynchronous communication via LINE and Discord.
+## 🏗️ Architecture
 
-## System Diagram / システム構成
+BCNOFNe runs as a distributed network of microservices within a Docker bridge network.
 
-- **core**: AIの思考・コマンド解釈・全体指示を行う頭脳。 / The brain handling AI thinking, command interpretation, and overall instructions.
-- **memory-service**: 短期・長期の記憶と要約を提供するサービス。 / A service providing short and long-term memory and summaries.
-- **diary-service**: 日々の航海記録（ログ）をまとめ、日誌を作るサービス。 / A service that compiles daily voyage records (logs) into a diary.
-- **dev-agent**: システムを自己改修する整備士コンテナ。 / The mechanic container that self-modifies the system.
-- **line-gateway**: LINE Bot との通信窓口。 / Communication gateway for LINE Bot.
-- **browser-agent**: ブラウザ操作の実行環境。 / Execution environment for browser automation.
+```mermaid
+graph TB
+    subgraph "Interface"
+        LINE[LINE Bot]
+        Web[GUI Dashboard]
+        Discord[Discord Hooks]
+    end
 
-詳細は [ユーザーマニュアル](docs/user-manual.md) を参照してください。
-For details, see the [User Manual](docs/user-manual.md).
+    subgraph "shipOS Core (Docker)"
+        Core["core (Brain)"]
+        DA["dev-agent (Evolution)"]
+        MS["memory-service (Cognition)"]
+        LG["line-gateway"]
+        BG["billing-guard (Safety)"]
+        DS["diary-service"]
+        BA["browser-agent (Web)"]
+        OLED["oled-controller (HW)"]
+    end
 
-## Installation / インストール
+    subgraph "Hardware"
+        Pi[Raspberry Pi 4B]
+        SSD[Short-term / OS]
+        HDD[Long-term / NAS]
+        Disp[OLED SSD1306]
+    end
 
-AYN が自動でコード修正・commit・push を行うため、本家リポジトリを直接運用対象にすると履歴が不安定になりやすいです。
-Since AYN autonomously modifies, commits, and pushes code, using the upstream repository directly can cause unstable history.
-
-そのため、**本リポジトリを Fork して運用用リポジトリとして使用すること**を強く推奨します。
-Therefore, it is **highly recommended to Fork this repository and use it as your operational repository**.
-
-詳しい手順は [インストールガイド](docs/installation.md) を参照してください。
-For detailed instructions, see the [Installation Guide](docs/installation.md).
-
-## Quick Start / クイックスタート
-
-```bash
-cp .env.example .env
-nano .env  # 必要なAPIキーを設定 / Set necessary API keys
-docker compose up -d --build
+    LINE <--> LG <--> Core
+    Core <--> MS
+    Core <--> DA
+    DA --> GitHub
+    Core --> OLED --> Disp
 ```
 
-## Commands / コマンド
+---
 
-LINE経由でシステムを制御するための主要なコマンドが用意されています。
-Major commands are prepared to control the system via LINE.
+## 🤖 AI Self-Improvement Cycle
 
-詳細は [LINEコマンドリファレンス](docs/line-commands.md) をご覧ください。
-For details, please look at the [LINE Command Reference](docs/line-commands.md).
+The `dev-agent` service is the "mechanic" of the ship. It operates in a continuous loop:
 
-## Roadmap / ロードマップ
+1.  **Observe**: Monitors system logs and performance metrics.
+2.  **Propose**: Generates a `JSON` improvement proposal (Fix bugs, optimize code).
+3.  **Approve**: The Master (you) reviews and approves the proposal via LINE/GUI.
+4.  **Apply**: The AI applies the patch, commits, and pushes to GitHub.
+5.  **Restart**: The system reloads itself to apply the evolution.
 
-- 音声による対話機能の強化 / Enhancement of voice interaction features
-- 外部エージェント（他船）との通信プロトコル / Communication protocol with external agents (other ships)
-- ローカルLLMによる完全なオフライン稼働 / Complete offline operation via local LLM
+---
 
-## Evolution Log / 進化ログ
+## 🧠 Memory System (7-Layer Model)
 
-[公開ログディレクトリ](logs/public/) に、日々の進化の記録がMarkdownで自動保存されます。
-Records of daily evolution are automatically saved as Markdown in the [Public Log Directory](logs/public/).
+Inspired by cognitive science, AYN integrates information through 7 distinct layers:
+
+1.  **WORKING**: Current context and task status.
+2.  **EPISODIC**: Daily logs and specific event records.
+3.  **SEMANTIC**: General knowledge and system specifications.
+4.  **PROCEDURAL**: Code structures and tool-using "how-tos".
+5.  **REFLECTIVE**: Post-task analysis and "lessons learned".
+6.  **RELATIONAL**: Context on the Master's preferences and past interactions.
+7.  **MISSION**: The core purpose and long-term goals of the voyage.
+
+---
+
+## 🛠️ Tech Stack
+
+| Category | Technology |
+| :--- | :--- |
+| **Language** | Python 3.11 |
+| **Backend** | FastAPI / Uvicorn |
+| **AI / LLM** | OpenAI GPT-4o (via AsyncOpenAI) |
+| **Container** | Docker / Docker Compose |
+| **Automation** | Playwright (browser-agent) |
+| **Database** | SQLAlchemy / SQLite |
+| **Hardware** | pigpio, SSD1306, I2C, RPi GPIO |
+
+---
+
+## 📥 Installation
+
+```bash
+# 1. Fork & Clone
+git clone https://github.com/YOUR_USERNAME/autonomous-ai-bcnofne-v3.git
+cd autonomous-ai-bcnofne-v3
+
+# 2. Configure Environment
+cp .env.example .env
+nano .env  # Add your API keys
+
+# 3. Launch the Ship
+bash start.sh
+```
+> [!IMPORTANT]
+> Because AYN modifies her own code, it is **strongly recommended to fork this repo** before deployment.
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] **Autonomous Testing**: AI writes and runs unit tests before applying code.
+- [ ] **Plugin Architecture**: Modular "Skills" installation system.
+- [ ] **Distributed Nodes**: Communication protocol for multiple BCNOFNe ships.
+- [ ] **Local LLM**: Optional integration with Ollama for 100% offline flight.
+
+---
+
+## 🤝 Contributing
+
+We welcome explorers and mechanics to join our voyage!
+- **Issues**: Report bugs or suggest new horizons.
+- **Pull Requests**: Help refine the shipOS kernel.
+
+---
+
+## ⭐ Support
+
+If you find this project interesting or inspiring, please consider giving it a **Star**! 
+It helps AYN reach much further into the digital ocean. 🌊🌟
+
+---
+
+## ⚖️ License
+
+Distributed under the **MIT License**. See `LICENSE` for more information.
+
+---
+(C) 2026 Aynyan 프로젝트 / CryptoArk Project.
+Making AI not just a tool, but a lifeform.
