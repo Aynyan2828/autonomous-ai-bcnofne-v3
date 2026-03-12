@@ -15,17 +15,20 @@ logger = ShipLogger("core.dns_collector")
 class DNSMetricsCollector:
     """DNSメトリクスの定期収集を担当するクラス"""
     def __init__(self):
+        host_ip = os.getenv("HOST_IP", "127.0.0.1")
+        
         self.adguard = AdGuardClient(
-            os.getenv("ADGUARD_URL", "http://localhost:8080"),
+            os.getenv("ADGUARD_URL", f"http://{host_ip}:8080"),
             os.getenv("ADGUARD_USERNAME", "admin"),
             os.getenv("ADGUARD_PASSWORD", "password")
         )
         self.pihole = PiholeClient(
-            os.getenv("PIHOLE_URL", "http://localhost/admin"),
+            os.getenv("PIHOLE_URL", f"http://{host_ip}/admin"),
             os.getenv("PIHOLE_API_TOKEN", "")
         )
         self.unbound = UnboundClient(
-            os.getenv("UNBOUND_HOST", "127.0.0.1"),
+            os.getenv("UNBOUND_HOST", host_ip),
+            # Unbound defaults to 53 generally, but often users use 5353
             int(os.getenv("UNBOUND_PORT", "53"))
         )
 
