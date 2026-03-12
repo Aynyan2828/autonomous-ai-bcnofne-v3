@@ -34,8 +34,9 @@ class DiaryResponse(BaseModel):
     date_str: str
     summary: str
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 @app.get("/health")
 def health_check():

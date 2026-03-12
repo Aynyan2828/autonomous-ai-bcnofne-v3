@@ -44,8 +44,9 @@ class MemoryResponse(BaseModel):
     importance: int
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 class ProposalCreate(BaseModel):
     id: str
@@ -73,8 +74,9 @@ class ProposalResponse(BaseModel):
     status: str
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 @app.get("/health")
 def health_check():
