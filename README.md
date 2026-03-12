@@ -175,5 +175,5 @@ It helps AYN reach much further into the digital ocean. 🌊🌟
 Distributed under the **MIT License**. See `LICENSE` for more information.
 
 ---
-(C) 2026 Aynyan 프로젝트 / CryptoArk Project.
+(C) 2026 Aynyan / CryptoArk BCNOFNe Project.
 Making AI not just a tool, but a lifeform.
