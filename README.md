@@ -144,7 +144,7 @@ Inspired by cognitive science, AYN integrates information through 7 distinct lay
 
 ```bash
 # 1. Fork & Clone
-git clone https://github.com/YOUR_USERNAME/autonomous-ai-bcnofne-v3.git
+git clone https://github.com/Aynyan2828/autonomous-ai-bcnofne-v3.git
 cd autonomous-ai-bcnofne-v3
 
 # 2. Configure Environment
