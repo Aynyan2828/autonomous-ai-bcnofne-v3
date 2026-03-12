@@ -30,17 +30,22 @@ class PiholeClient(DNSClientBase):
                 resp = await client.get(url, params=params)
                 if resp.status_code == 200:
                     data = resp.json()
-                    if isinstance(data, list) and not data: # Auth failure often returns []
-                        pass
+                    if isinstance(data, list) and not data:
+                        pass # Continue to next or fallback
                     else:
                         return data
-                elif resp.status_code == 400 and "auth" in params:
-                    # 400 の場合はトークン形式が違う可能性を考慮し、なしで試す
-                    p2 = params.copy()
-                    p2.pop("auth")
-                    resp2 = await client.get(url, params=p2)
-                    if resp2.status_code == 200:
-                        return resp2.json()
+                elif resp.status_code == 400:
+                    # 400 の理由をキャプチャ
+                    text = resp.text[:100]
+                    logger.warning(f"Pi-hole 400 Error: {text}")
+                    if "auth" in params:
+                        # トークンなしで試す（一部の統計はトークン不要な場合があるため）
+                        p2 = params.copy()
+                        p2.pop("auth")
+                        resp2 = await client.get(url, params=p2)
+                        if resp2.status_code == 200:
+                            return resp2.json()
+                    return {"error": f"Bad Request (400): {text}"}
             except Exception:
                 pass
 
@@ -53,4 +58,4 @@ class PiholeClient(DNSClientBase):
             except Exception as e:
                 return {"error": str(e), "url": url}
             
-            return {"error": "Pi-hole API returned non-200 or empty response"}
+            return {"error": "Pi-hole API failed (check URL or Token format)"}
