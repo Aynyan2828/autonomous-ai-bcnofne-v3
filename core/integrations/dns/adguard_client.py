@@ -7,8 +7,8 @@ class AdGuardClient(DNSClientBase):
     """AdGuard Home REST API クライアント (全角パスワード対応版)"""
     def __init__(self, base_url: str, username: str, password: str, timeout: float = 5.0):
         super().__init__(base_url.strip().rstrip("/"), timeout)
-        # 全角文字対応のため、明示的に UTF-8 でエンコードして Basic 認証を構築
-        u = username.strip()
+        # AdGuard Home のデフォルトユーザー名は admin であることが多い
+        u = username.strip() if username.strip() else "admin"
         p = password.strip()
         auth_bytes = f"{u}:{p}".encode("utf-8")
         auth_b64 = base64.b64encode(auth_bytes).decode("ascii")
@@ -22,7 +22,14 @@ class AdGuardClient(DNSClientBase):
                 if resp.status_code == 200:
                     return resp.json()
                 
-                # 失敗時はステータスコードとボディの冒頭を返す
+                # 401 の場合は認証方法やユーザー名の不一致を疑う
+                if resp.status_code == 401:
+                    return {
+                        "error": "HTTP 401 Unauthorized",
+                        "body": "User/Pass mismatch or AdGuard 'auth_name' config error.",
+                        "url": url
+                    }
+                
                 body_peek = resp.text[:200]
                 return {
                     "error": f"HTTP {resp.status_code}",

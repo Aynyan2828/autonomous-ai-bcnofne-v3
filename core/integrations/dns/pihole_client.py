@@ -5,7 +5,7 @@ import httpx
 class PiholeClient(DNSClientBase):
     """Pi-hole API クライアント (v6 /api 対応)"""
     def __init__(self, base_url: str, password: Optional[str] = None, timeout: float = 5.0):
-        # ユーザーが末尾に /admin を入れても正規化
+        # v6 では /api がルート。ユーザーが /admin を入れた場合は除去。
         base = base_url.strip().replace("/admin", "").rstrip("/")
         super().__init__(base, timeout)
         self.password = password.strip() if password else None
@@ -20,7 +20,10 @@ class PiholeClient(DNSClientBase):
         
         try:
             url = f"{self.base_url}/api/auth"
-            resp = await client.post(url, json={"password": self.password})
+            # v6 では JSON 送信と Header が重要
+            headers = {"Content-Type": "application/json"}
+            resp = await client.post(url, json={"password": self.password}, headers=headers)
+            
             if resp.status_code == 200:
                 data = resp.json()
                 self._sid = data.get("session", {}).get("sid")
@@ -44,11 +47,12 @@ class PiholeClient(DNSClientBase):
             
             url = f"{self.base_url}/api/stats/summary"
             try:
+                # sid はクエリパラメータまたはヘッダ (X-FTL-SID) で渡せる
                 resp = await client.get(url, params={"sid": self._sid})
                 if resp.status_code == 200:
                     return resp.json()
                 
-                # 401/403 なら再ログイン試行
+                # 401/403 ならセッション切れ
                 if resp.status_code in [401, 403]:
                     if await self._login(client):
                         resp = await client.get(url, params={"sid": self._sid})
@@ -70,6 +74,7 @@ class PiholeClient(DNSClientBase):
                 resp = await client.get(url, params={"sid": self._sid})
                 if resp.status_code == 200:
                     data = resp.json()
+                    # AYN 監視用に v5 互換の辞書に変換
                     return {"status": "enabled" if data.get("blocking", False) else "disabled"}
                 
                 if resp.status_code in [401, 403]:

@@ -55,9 +55,19 @@ class UnboundClient:
                 )
                 writer.close()
                 await writer.wait_closed()
-                return {"status": "ONLINE", "latency_ms": (time.time() - start_time) * 1000, "check_method": "TCP-Connect"}
+                return {
+                    "status": "ONLINE", 
+                    "latency_ms": (time.time() - start_time) * 1000, 
+                    "check_method": "TCP-Connect",
+                    "diagnostic": "DNS query failed, but TCP connected. Check Unbound access-control/interface."
+                }
             except:
-                return {"status": "ONLINE", "latency_ms": (time.time() - start_time) * 1000, "check_method": "UDP-Bind"}
+                return {
+                    "status": "ONLINE", 
+                    "latency_ms": (time.time() - start_time) * 1000, 
+                    "check_method": "UDP-Bind",
+                    "diagnostic": "Slow response. Check Unbound ACL (access-control: 172.x.x.x/12 allow) or interface: 0.0.0.0"
+                }
                 
         except Exception as e:
             return {"status": "OFFLINE", "error": str(e)}
