@@ -33,7 +33,6 @@ class DNSMetricsCollector:
 
     async def collect_all(self):
         """全サービスのメトリクスを収集してDBに保存 (逐次実行でSQLiteの競合を回避)"""
-        # 逐次実行することで、同一セッション内での競合を避ける
         await self._collect_adguard()
         await self._collect_pihole()
         await self._collect_unbound()
@@ -44,13 +43,16 @@ class DNSMetricsCollector:
             stats = await self.adguard.get_stats()
             status_info = await self.adguard.get_status()
             
-            status = "ONLINE" if status_info else "OFFLINE"
+            # get_stats/get_status が辞書を返し、その中に "error" があれば失敗とみなす
+            is_success = status_info and "error" not in status_info
+            status = "ONLINE" if is_success else "OFFLINE"
+            
             metrics = DNSMetrics(
                 service_type="adguard",
                 status=status,
-                query_count=stats.get("num_dns_queries", 0) if stats else 0,
-                block_count=stats.get("num_blocked_filtering", 0) if stats else 0,
-                metrics_json=json.dumps({"stats": stats, "status": status_info}) if (stats or status_info) else None
+                query_count=stats.get("num_dns_queries", 0) if (stats and "error" not in stats) else 0,
+                block_count=stats.get("num_blocked_filtering", 0) if (stats and "error" not in stats) else 0,
+                metrics_json=json.dumps({"stats": stats, "status": status_info})
             )
             db.add(metrics)
             db.commit()
@@ -65,13 +67,15 @@ class DNSMetricsCollector:
             summary = await self.pihole.get_summary()
             status_info = await self.pihole.get_status()
             
-            status = "ONLINE" if (status_info and status_info.get("status") == "enabled") else "OFFLINE"
+            is_success = status_info and "error" not in status_info and status_info.get("status") == "enabled"
+            status = "ONLINE" if is_success else "OFFLINE"
+            
             metrics = DNSMetrics(
                 service_type="pihole",
                 status=status,
-                query_count=summary.get("dns_queries_today", 0) if summary else 0,
-                block_count=summary.get("ads_blocked_today", 0) if summary else 0,
-                metrics_json=json.dumps({"summary": summary, "status": status_info}) if (summary or status_info) else None
+                query_count=summary.get("dns_queries_today", 0) if (summary and "error" not in summary) else 0,
+                block_count=summary.get("ads_blocked_today", 0) if (summary and "error" not in summary) else 0,
+                metrics_json=json.dumps({"summary": summary, "status": status_info})
             )
             db.add(metrics)
             db.commit()

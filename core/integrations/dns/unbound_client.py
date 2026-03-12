@@ -14,29 +14,39 @@ class UnboundClient:
         self.timeout = timeout
 
     async def check_health(self) -> Dict[str, Any]:
-        """UDP 53番ポートへの疎通確認"""
+        """UDP 53番ポートへの実クエリによる疎通確認"""
         start_time = time.time()
         try:
-            # UDPソケットでの疎通確認
+            # 最小限の DNS クエリパケット (localhost の A レコード)
+            # Transaction ID: 0x1234
+            # Flags: 0x0100 (Standard query)
+            # Questions: 1, Answer RRs: 0, Authority RRs: 0, Additional RRs: 0
+            # Query: localhost (0x09 'localhost' 0x00), Type: A (0x0001), Class: IN (0x0001)
+            query = (
+                b'\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00'
+                b'\x09localhost\x00\x00\x01\x00\x01'
+            )
+            
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(self.timeout)
             
-            # ダミーの空パケットを送ってみる（返信は期待しないが、エラーにならないか確認）
-            # または DNS クエリを送るのが理想。ここでは単に送信可能かを確認
-            # NOTE: UDPはコネクションレスなので、到達 = 送信エラーなし 程度の確認
-            
-            # 本当は 127.0.0.1 への query を投げたいが、権限や設定に依存するため
-            # シンプルに「送信してエラーが出ないか」を確認
-            sock.sendto(b'', (self.host, self.port))
+            sock.sendto(query, (self.host, self.port))
+            data, _ = sock.recvfrom(512) # 応答を待機
             sock.close()
             
-            latency = (time.time() - start_time) * 1000
-            return {
-                "status": "ONLINE",
-                "latency_ms": latency
-            }
+            if len(data) > 0:
+                latency = (time.time() - start_time) * 1000
+                return {
+                    "status": "ONLINE",
+                    "latency_ms": latency
+                }
+            else:
+                return {"status": "OFFLINE", "error": "Empty response"}
+                
+        except socket.timeout:
+            return {"status": "OFFLINE", "error": "Timeout"}
         except Exception as e:
-            logger.error(f"Unbound UDP health check failed on {self.host}:{self.port}: {e}")
+            logger.error(f"Unbound UDP query failed on {self.host}:{self.port}: {e}")
             return {
                 "status": "OFFLINE",
                 "error": str(e)
