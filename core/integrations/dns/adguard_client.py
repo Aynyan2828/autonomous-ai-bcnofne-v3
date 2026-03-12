@@ -44,9 +44,17 @@ class AdGuardClient(DNSClientBase):
                 if resp.status_code == 200:
                     return resp.json()
                 
+                # 401 や 403 でもサーバーが応答しているなら ONLINE (要認証) とみなす情報を付与
+                status = "OFFLINE"
+                if resp.status_code in [401, 403]:
+                    status = "ONLINE (Auth Required)"
+                elif resp.status_code < 500:
+                    status = "ONLINE"
+
                 return {
                     "error": f"HTTP {resp.status_code}",
                     "body": resp.text[:200],
+                    "status_override": status,
                     "url": url
                 }
             except Exception as e:

@@ -12,6 +12,16 @@ class PiholeClient(DNSClientBase):
         self._sid: Optional[str] = None
         self._last_error: Optional[str] = None
 
+    async def check_connectivity(self) -> bool:
+        """APIではなくルートパスや /api/info (もしあれば) へのアクセスで生存確認"""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                # v6 のルートまたは適当なエンドポイントへの GET
+                resp = await client.get(self.base_url)
+                return resp.status_code < 500
+            except:
+                return False
+
     async def _login(self, client: httpx.AsyncClient) -> bool:
         """SID を取得する (v6 認証)"""
         if not self.password:
@@ -20,7 +30,6 @@ class PiholeClient(DNSClientBase):
         
         try:
             url = f"{self.base_url}/api/auth"
-            # v6 では JSON 送信と Header が重要
             headers = {"Content-Type": "application/json"}
             resp = await client.post(url, json={"password": self.password}, headers=headers)
             
@@ -43,23 +52,30 @@ class PiholeClient(DNSClientBase):
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             if not self._sid:
                 if not await self._login(client):
-                    return {"error": self._last_error}
+                    # 認証失敗でも、接続自体ができているなら ONLINE 扱いにするための情報を付与
+                    conn = await self.check_connectivity()
+                    return {
+                        "error": self._last_error, 
+                        "status_override": "ONLINE (Auth Failed)" if conn else "OFFLINE"
+                    }
             
             url = f"{self.base_url}/api/stats/summary"
             try:
-                # sid はクエリパラメータまたはヘッダ (X-FTL-SID) で渡せる
                 resp = await client.get(url, params={"sid": self._sid})
                 if resp.status_code == 200:
                     return resp.json()
                 
-                # 401/403 ならセッション切れ
                 if resp.status_code in [401, 403]:
                     if await self._login(client):
                         resp = await client.get(url, params={"sid": self._sid})
                         if resp.status_code == 200:
                             return resp.json()
                 
-                return {"error": f"HTTP {resp.status_code}", "body": resp.text[:100]}
+                return {
+                    "error": f"HTTP {resp.status_code}", 
+                    "status_override": "ONLINE" if resp.status_code < 500 else "OFFLINE",
+                    "body": resp.text[:100]
+                }
             except Exception as e:
                 return {"error": str(e), "url": url}
 
@@ -67,14 +83,14 @@ class PiholeClient(DNSClientBase):
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             if not self._sid:
                 if not await self._login(client):
-                    return {"error": self._last_error}
+                    conn = await self.check_connectivity()
+                    return {"error": self._last_error, "status": "enabled" if conn else "disabled"}
             
             url = f"{self.base_url}/api/dns/blocking"
             try:
                 resp = await client.get(url, params={"sid": self._sid})
                 if resp.status_code == 200:
                     data = resp.json()
-                    # AYN 監視用に v5 互換の辞書に変換
                     return {"status": "enabled" if data.get("blocking", False) else "disabled"}
                 
                 if resp.status_code in [401, 403]:
@@ -84,6 +100,6 @@ class PiholeClient(DNSClientBase):
                             data = resp.json()
                             return {"status": "enabled" if data.get("blocking", False) else "disabled"}
 
-                return {"error": f"HTTP {resp.status_code}", "body": resp.text[:100]}
+                return {"error": f"HTTP {resp.status_code}", "status": "enabled"} # 応答があるなら enabled 扱い
             except Exception as e:
-                return {"error": str(e)}
+                return {"error": str(e), "status": "disabled"}

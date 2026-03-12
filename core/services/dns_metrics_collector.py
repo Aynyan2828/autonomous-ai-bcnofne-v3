@@ -23,7 +23,7 @@ class DNSMetricsCollector:
             os.getenv("ADGUARD_PASSWORD", "password")
         )
         self.pihole = PiholeClient(
-            os.getenv("PIHOLE_URL", f"http://{host_ip}/api"), # v6 default is /api
+            os.getenv("PIHOLE_URL", f"http://{host_ip}/api"),
             os.getenv("PIHOLE_PASSWORD", "")
         )
         self.unbound = UnboundClient(
@@ -32,7 +32,7 @@ class DNSMetricsCollector:
         )
 
     async def collect_all(self):
-        """全サービスのメトリクスを収集してDBに保存 (逐次実行でSQLiteの競合を回避)"""
+        """全サービスのメトリクスを収集してDBに保存"""
         await self._collect_adguard()
         await self._collect_pihole()
         await self._collect_unbound()
@@ -43,15 +43,19 @@ class DNSMetricsCollector:
             stats = await self.adguard.get_stats()
             status_info = await self.adguard.get_status()
             
-            # get_stats/get_status が辞書を返し、その中に "error" があれば失敗とみなす
-            is_success = status_info and "error" not in status_info
-            status = "ONLINE" if is_success else "OFFLINE"
+            # クライアントが status_override を返している場合はそれを優先
+            status = "OFFLINE"
+            if isinstance(status_info, dict):
+                if status_info.get("status_override"):
+                    status = status_info["status_override"]
+                elif "error" not in status_info:
+                    status = "ONLINE"
             
             metrics = DNSMetrics(
                 service_type="adguard",
                 status=status,
-                query_count=stats.get("num_dns_queries", 0) if (stats and "error" not in stats) else 0,
-                block_count=stats.get("num_blocked_filtering", 0) if (stats and "error" not in stats) else 0,
+                query_count=stats.get("num_dns_queries", 0) if (isinstance(stats, dict) and "error" not in stats) else 0,
+                block_count=stats.get("num_blocked_filtering", 0) if (isinstance(stats, dict) and "error" not in stats) else 0,
                 metrics_json=json.dumps({"stats": stats, "status": status_info})
             )
             db.add(metrics)
@@ -67,14 +71,18 @@ class DNSMetricsCollector:
             summary = await self.pihole.get_summary()
             status_info = await self.pihole.get_status()
             
-            is_success = status_info and "error" not in status_info and status_info.get("status") == "enabled"
-            status = "ONLINE" if is_success else "OFFLINE"
+            status = "OFFLINE"
+            if isinstance(summary, dict) and summary.get("status_override"):
+                status = summary["status_override"]
+            elif isinstance(status_info, dict) and "error" not in status_info:
+                # v6 の enabled/disabled を ONLINE/OFFLINE に変換
+                status = "ONLINE" if status_info.get("status") == "enabled" else "OFFLINE"
             
             metrics = DNSMetrics(
                 service_type="pihole",
                 status=status,
-                query_count=summary.get("dns_queries_today", 0) if (summary and "error" not in summary) else 0,
-                block_count=summary.get("ads_blocked_today", 0) if (summary and "error" not in summary) else 0,
+                query_count=summary.get("dns_queries_today", 0) if (isinstance(summary, dict) and "error" not in summary) else 0,
+                block_count=summary.get("ads_blocked_today", 0) if (isinstance(summary, dict) and "error" not in summary) else 0,
                 metrics_json=json.dumps({"summary": summary, "status": status_info})
             )
             db.add(metrics)
