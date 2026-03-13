@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>shipOS - AYN</title>
+    <link rel="stylesheet" href="/assets/css/main.css">
+    <link rel="stylesheet" href="/assets/css/loading.css">
+    <link rel="icon" href="/assets/icons/favicon.ico">
+    <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay">
+        <div class="loading-container">
+            <div class="glow-bg"></div>
+            <div class="mascot-wrapper">
+                <img src="/assets/icons/icon-512.png" alt="AYN Mascot" class="mascot">
+                <div class="logo-glow"></div>
+            </div>
+            <div class="text-container">
+                <h1 class="booting-text">AYN booting...</h1>
+                <p class="status-msg">Preparing autonomous navigation...</p>
+            </div>
+            <div class="loading-bar-container">
+                <div class="loading-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main-content">
+        <h1>⚓ shipOS — AYN</h1>
+        
+        <!-- システム状態 -->
+        <div class="card">
+            <h2>🚢 Status</h2>
+            {% for item in system_states %}
+            <div class="status-row">
+                <span class="status-key">{{ item.key }}</span>
+                <span class="status-val">{{ item.value }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <!-- 課金状態 -->
+        <div class="card">
+            <h2>💰 Billing</h2>
+            <div class="status-row">
+                <span class="status-key">Cost</span>
+                <span class="status-val">{{ billing_data.current_cost_jpy }} 円</span>
+            </div>
+            <div class="status-row">
+                <span class="status-key">Requests</span>
+                <span class="status-val">{{ billing_data.request_count }} 回</span>
+            </div>
+            <div class="status-row">
+                <span class="status-key">Alert</span>
+                <span class="status-val {% if billing_data.alert_level == 'STOP' %}alert{% elif billing_data.alert_level in ['ALERT', 'WARNING'] %}warning{% endif %}">
+                    {{ billing_data.alert_level }}
+                </span>
+            </div>
+        </div>
+        
+        <!-- 自律改修案 (Proposals) -->
+        <div class="card">
+            <h2>🛠️ 自律改修案 (Proposals)</h2>
+            <div class="prop-filter-bar">
+                <button class="prop-tab-btn active" onclick="filterProposals('PENDING', this)">PENDING</button>
+                <button class="prop-tab-btn" onclick="filterProposals('APPLIED', this)">APPLIED</button>
+                <button class="prop-tab-btn" onclick="filterProposals('REJECTED', this)">REJECTED</button>
+                <button class="prop-tab-btn" onclick="filterProposals('FAILED', this)">FAILED</button>
+                <button class="prop-tab-btn" onclick="filterProposals('ALL', this)">ALL</button>
+            </div>
+            
+            {% for prop in proposals %}
+            <details class="proposal-details prop-item" data-status="{{ prop.status }}">
+                <summary class="proposal-summary">
+                    <span class="prop-id">{{ prop.id }}</span>
+                    <span class="prop-status status-{{ prop.status }}">{{ prop.status }}</span>
+                    <span class="prop-title">{{ prop.title }}</span>
+                </summary>
+                <div class="proposal-content">
+                    <p class="prop-desc">{{ prop.description }}</p>
+                    {% if prop.reason %}
+                    <p class="prop-reason"><strong>選定理由:</strong> {{ prop.reason }}</p>
+                    {% endif %}
+                    {% if prop.diff %}
+                    <div class="diff-container">
+                        <div class="diff-header">
+                            <span>生成コード差分 (Diff)</span>
+                            <button class="full-code-btn" onclick="openFullCode('{{ prop.files_affected }}')">📄 全文を見る</button>
+                        </div>
+                        <div class="diff-block raw-diff" style="display:none;">{{ prop.diff }}</div>
+                        <div class="diff-block formatted-diff"></div>
+                    </div>
+                    {% endif %}
+                    
+                    {% if prop.status == 'PENDING' %}
+                    <div class="proposal-actions" style="margin-top: 12px; display: flex; gap: 10px;">
+                        <button class="action-btn apply-btn" onclick="applyProposal('{{ prop.id }}')">✅ 適用する (Apply)</button>
+                        <button class="action-btn reject-btn" onclick="rejectProposal('{{ prop.id }}')">❌ 却下する (Reject)</button>
+                    </div>
+                    {% endif %}
+                </div>
+            </details>
+            {% endfor %}
+            <div id="prop-empty-msg" class="log-entry" style="display: none;"><span class="log-msg">このステータスの改修案はなかよ。</span></div>
+        </div>
+        
+        <!-- 公開ログ (Voyage / Evolution) -->
+        <div class="card">
+            <h2>📖 公開ログ (Public Logs)</h2>
+            <div id="public-logs-container">
+                <div class="log-entry"><span class="log-msg">読み込み中ばい...</span></div>
+            </div>
+        </div>
+
+        <!-- ログ -->
+        <div class="card">
+            <h2>📋 ログ</h2>
+            <div class="filter-bar">
+                <button class="filter-btn active" onclick="filterLogs('ALL',this)">ALL</button>
+                <button class="filter-btn" onclick="filterLogs('INFO',this)">INFO</button>
+                <button class="filter-btn" onclick="filterLogs('WARN',this)">WARN</button>
+                <button class="filter-btn" onclick="filterLogs('ERROR',this)">ERROR</button>
+                <button class="filter-btn" onclick="filterLogs('CRITICAL',this)">CRIT</button>
+            </div>
+            <div class="log-container" id="log-container">
+                {% for log in logs %}
+                <div class="log-entry" data-level="{{ log.level }}">
+                    <div class="log-head">
+                        <span class="log-time">{{ log.time }}</span>
+                        <span class="log-svc">{{ log.service }}</span>
+                        <span class="log-{{ log.level }}">{{ log.level }}</span>
+                    </div>
+                    <span class="log-msg">{{ log.message }}</span>
+                </div>
+                {% endfor %}
+                {% if not logs %}
+                <div class="log-entry"><span class="log-msg">ログがまだないよ。</span></div>
+                {% endif %}
+            </div>
+            <div class="refresh-bar">
+                <span class="refresh-info">30秒で自動更新</span>
+                <button class="refresh-btn" onclick="location.reload()">↻ 更新</button>
+            </div>
+        </div>
+        
+        <!-- ファイル全文表示モーダル -->
+        <div id="codeModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span class="modal-title" id="modalTitle">Loading...</span>
+                    <div class="modal-actions">
+                        <button class="copy-btn" id="copyBtn" onclick="copyFullCode()">📋 コピー</button>
+                        <button class="close-btn" onclick="closeModal()">閉じる</button>
+                    </div>
+                </div>
+                <div id="fullCodeView">コードを読み込み中...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/assets/js/dashboard.js"></script>
+    <script>
+        // Loading Overlay Logic
+        window.addEventListener('load', () => {
+            // 最低 1.5 秒は表示させてカッコよくするバイ
+            setTimeout(() => {
+                const overlay = document.getElementById('loading-overlay');
+                overlay.classList.add('hidden');
+                setTimeout(() => {
+                    overlay.style.display = 'none';
+                }, 800);
+            }, 1500);
+        });
+    </script>
+</body>
+</html>

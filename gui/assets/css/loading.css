@@ -5,7 +5,7 @@
     --text-color: #e0e6ed;
 }
 
-body, html {
+#loading-overlay {
     margin: 0;
     padding: 0;
     width: 100%;
@@ -13,7 +13,7 @@ body, html {
     background-color: var(--bg-color);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     display: flex;
-    justify_content: center;
+    justify-content: center;
     align-items: center;
     overflow: hidden;
     color: var(--text-color);
