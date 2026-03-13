@@ -294,20 +294,31 @@ async def lifespan(app: FastAPI):
     # 2. IP Address Discovery
     db = SessionLocal()
     try:
+        # 古い小文字キーがある場合は削除（クリーンアップ）
+        db.query(SystemState).filter(SystemState.key.in_(["host_ip", "tailscale_ip"])).delete(synchronize_session=False)
+        db.commit()
+
         host_ip = os.getenv("HOST_IP", "").strip()
         ts_ip = os.getenv("TAILSCALE_IP", "").strip()
         
+        # ネットワークインターフェースからの取得を試行
+        interfaces = psutil.net_if_addrs()
+        
         if not host_ip or host_ip == "NOT_FOUND":
-            for interface, addrs in psutil.net_if_addrs().items():
+            # eth0, wlan0 等からプライベートIPを探す
+            for interface, addrs in interfaces.items():
                 for addr in addrs:
                     if addr.family == socket.AF_INET:
                         ip = addr.address
-                        if not ip.startswith("127.") and not ip.startswith("172."):
+                        # ループバックとDockerブリッジ以外を優先
+                        if not ip.startswith("127.") and not ip.startswith("172.17."):
                             host_ip = ip
-                            break
+                            if ip.startswith("192.168.") or ip.startswith("10."):
+                                break # 理想的なIPが見つかれば確定
         
         if not ts_ip or ts_ip == "NOT_FOUND":
-            for interface, addrs in psutil.net_if_addrs().items():
+            # Tailscale の IP (100.x) を探す
+            for interface, addrs in interfaces.items():
                 for addr in addrs:
                     if addr.family == socket.AF_INET and addr.address.startswith("100."):
                         ts_ip = addr.address
