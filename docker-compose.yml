@@ -124,7 +124,11 @@ services:
       - "8010:8010"
 
   oled-controller:
-    <<: *common
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Tokyo
+    env_file:
+      - .env
     build:
       context: .
       dockerfile: oled-controller/Dockerfile
@@ -135,6 +139,7 @@ services:
       - "/dev/i2c-1:/dev/i2c-1"
       - "/dev/gpiomem:/dev/gpiomem"
     volumes:
+      - .:/app
       - ./data:/app/data
       - ./.env:/app/.env:ro
       - /mnt/ssd:/mnt/ssd
