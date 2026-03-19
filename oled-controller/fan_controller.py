@@ -1,6 +1,6 @@
 import pigpio
 import time
-import logging
+from shared.logger import logger
 
 # ------------------------------------------------------------------------
 # 設定
@@ -66,9 +66,9 @@ class SystemThermalController:
             self.cb = self.pi.callback(self.tach_pin, pigpio.FALLING_EDGE, self._tach_callback)
             
             self._init_rgb_hardware()
-            logging.info(f"SystemThermalController: Init OK (PWM={self.pwm_pin}, TACH={self.tach_pin})")
+            logger.info(f"SystemThermalController: Init OK (PWM={self.pwm_pin}, TACH={self.tach_pin})")
         else:
-            logging.warning("SystemThermalController: pigpio not connected. Running in stub mode.")
+            logger.warning("SystemThermalController: pigpio not connected. Running in stub mode.")
 
     def _init_rgb_hardware(self):
         """
@@ -78,7 +78,7 @@ class SystemThermalController:
             return
             
         if self.pwm_pin == 18:
-            logging.error("SystemThermalController: PWM pin 18 CONFLICTS with WS281x RGB on ZP-0129. RGB Disabled.")
+            logger.error("SystemThermalController: PWM pin 18 CONFLICTS with WS281x RGB on ZP-0129. RGB Disabled.")
             self.config['rgb_enabled'] = False
             return
             
@@ -98,15 +98,15 @@ class SystemThermalController:
             self.strip = PixelStrip(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL, LED_STRIP)
             self.strip.begin()
             
-            logging.info("SystemThermalController: WS281x RGB hardware initialized (GRB Mode) on GPIO 18.")
+            logger.info("SystemThermalController: WS281x RGB hardware initialized (GRB Mode) on GPIO 18.")
         except ImportError:
-            logging.warning("SystemThermalController: 'rpi_ws281x' module missing. RGB Disabled. (Install via: sudo pip3 install rpi_ws281x)")
+            logger.warning("SystemThermalController: 'rpi_ws281x' module missing. RGB Disabled.")
             self.config['rgb_enabled'] = False
         except RuntimeError as e:
-            logging.warning(f"SystemThermalController: WS281x Init failed. RGB Disabled. (Needs 'sudo' to run). Error: {e}")
+            logger.warning(f"SystemThermalController: WS281x Init failed. RGB Disabled. Error: {e}")
             self.config['rgb_enabled'] = False
         except Exception as e:
-            logging.error(f"SystemThermalController: Unknown RGB Error: {e}")
+            logger.error(f"SystemThermalController: Unknown RGB Error: {e}")
             self.config['rgb_enabled'] = False
 
     def _apply_rgb_hardware(self, rgb_list):
@@ -117,14 +117,15 @@ class SystemThermalController:
         try:
             from rpi_ws281x import Color
             # デバッグログ追加
-            logging.info(f"SystemThermalController: Setting RGB -> {rgb_list}")
+            logger.info(f"SystemThermalController: Setting RGB -> {rgb_list}")
             
             # ZP-0129のWS281Bへ色送信
             color_val = Color(int(rgb_list[0]), int(rgb_list[1]), int(rgb_list[2]))
             for i in range(self.strip.numPixels()):
                 self.strip.setPixelColor(i, color_val)
             self.strip.show()
-        except Exception:
+        except Exception as e:
+            logger.error(f"SystemThermalController: RGB Write Error: {e}")
             pass
 
     def _tach_callback(self, gpio, level, tick):
@@ -201,7 +202,7 @@ class SystemThermalController:
         # 1. 状態の決定
         state = self._derive_status(temp, load)
         if state["label"] != self.current_status_label:
-            logging.info(f"SystemThermalController: State Change -> {state['label']} (Temp={temp:.1f}C, Load={load:.1f}%)")
+            logger.info(f"SystemThermalController: State Change -> {state['label']} (Temp={temp:.1f}C, Load={load:.1f}%)")
         self.current_status_label = state["label"]
         self.target_rgb = state["rgb"]
 
@@ -245,7 +246,7 @@ class SystemThermalController:
                 self.current_rgb = [255, 0, 0]
                 self._apply_rgb_hardware(self.current_rgb)
                 
-            logging.info("SystemThermalController: Stopped (Fan=100%, RGB=RED)")
+            logger.info("SystemThermalController: Stopped (Fan=100%, RGB=RED)")
 
 # ------------------------------------------------------------------------
 # 古い呼び出し元との上位互換ラッパー
