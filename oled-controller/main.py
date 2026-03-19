@@ -270,16 +270,31 @@ def setup_hardware():
         
         # もし localhost で接続失敗し、かつ環境変数が未設定なら、Gateway IPを動的取得して試行
         if not pi.connected and pigpio_host == "localhost":
-            logger.info("OLED/FAN: localhost failed. Trying to find Docker bridge gateway...")
-            import subprocess
+            logger.info("OLED/FAN: localhost failed. Trying pure python socket bridge gateway...")
+            import socket
+            
+            # Try host.docker.internal first
             try:
-                # Docker内からホスト側(Gateway)のIPを自動取得する
-                gateway_ip = subprocess.check_output("ip -4 route show default | awk '{print $3}'", shell=True).decode().strip()
-                if gateway_ip:
-                    logger.info(f"OLED/FAN: Found gateway IP: {gateway_ip}, retrying pigpiod...")
+                host_ip = socket.gethostbyname("host.docker.internal")
+                logger.info(f"OLED/FAN: Found host.docker.internal: {host_ip}")
+                pi = pigpio.pi(host_ip)
+            except Exception:
+                pass
+                
+            # Try bridging fallback
+            if not pi.connected:
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.settimeout(1)
+                    s.connect(("8.8.8.8", 80))
+                    container_ip = s.getsockname()[0]
+                    s.close()
+                    gateway_ip = container_ip.rsplit('.', 1)[0] + '.1'
+                    
+                    logger.info(f"OLED/FAN: Found gateway IP guess: {gateway_ip}, retrying...")
                     pi = pigpio.pi(gateway_ip)
-            except Exception as e:
-                logger.warning(f"OLED/FAN: Failed to get gateway IP. ({e})")
+                except Exception as e:
+                    logger.warning(f"OLED/FAN: Failed to get gateway IP. ({e})")
                 
             # それでもダメなら従来の固定IPフォールバック
             if not pi.connected:
