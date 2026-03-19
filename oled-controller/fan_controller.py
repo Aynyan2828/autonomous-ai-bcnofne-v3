@@ -96,12 +96,12 @@ class SystemThermalController:
             LED_INVERT     = False   
             LED_CHANNEL    = 0       
             # WS2812Bは一般的にGRB順序のため明示指定
-            LED_STRIP      = ws.WS2811_STRIP_GRB 
+            LED_STRIP      = ws.WS2811_STRIP_RGB 
             
             self.strip = PixelStrip(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL, LED_STRIP)
             self.strip.begin()
             
-            logger.info("SystemThermalController: WS281x RGB hardware initialized (GRB Mode) on GPIO 18.")
+            logger.info("SystemThermalController: WS281x RGB hardware initialized (RGB Mode) on GPIO 18.")
             # 起動時の同期: 最初の一回を強制反映
             self._apply_rgb_hardware(self.current_rgb)
         except ImportError:
