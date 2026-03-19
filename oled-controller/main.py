@@ -329,14 +329,14 @@ def get_cpu_temp():
     except:
         return 0.0
 
-def control_fan(temp):
+def control_fan(temp, load=0.0):
     global fan_ctrl, fan_status
     if not HARDWARE_AVAILABLE:
         return
 
     if fan_ctrl:
         try:
-            fan_ctrl.update(temp)
+            fan_ctrl.update(temp, load)
             fan_status = fan_ctrl.get_status()
             # 状態変化時のみログを出力
             if fan_status["status"] != getattr(control_fan, "last_label", ""):
@@ -515,7 +515,8 @@ async def hardware_loop():
     try:
         while True:
             temp = get_cpu_temp()
-            control_fan(temp)
+            load = psutil.cpu_percent()
+            control_fan(temp, load)
             update_oled(db)
             db.expire_all()
             await asyncio.sleep(0.1)

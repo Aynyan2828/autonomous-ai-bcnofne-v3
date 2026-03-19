@@ -8,7 +8,7 @@ logger = ShipLogger("oled-fan")
 # (将来的に JSON/YAML で外出し可能なように分離しています)
 # ------------------------------------------------------------------------
 CONFIG = {
-    "metric_mode": "temperature", # 'temperature' or 'load'
+    "metric_mode": "load", # 'temperature' or 'load' (RGB based on load, Fan based on temp)
     "update_interval": 1.0,       # 制御・計算の更新周期
     "fan_min_duty": 30,
     "fan_max_duty": 100,
@@ -136,14 +136,39 @@ class SystemThermalController:
     def _tach_callback(self, gpio, level, tick):
         self._pulses += 1
 
+    def _calc_gradient_rgb(self, load):
+        """ CPU負荷(0-100)に応じたグラデーション色を計算する (Blue -> Cyan -> Green -> Yellow -> Red) """
+        # カラーポイント定義: (位置, R, G, B)
+        points = [
+            (0,   0,   0,   255), # 0%:   Blue
+            (25,  0,   255, 255), # 25%:  Cyan
+            (50,  0,   255, 0),   # 50%:  Green
+            (75,  255, 255, 0),   # 75%:  Yellow
+            (100, 255, 0,   0)    # 100%: Red
+        ]
+        
+        load = max(0, min(100, load))
+        
+        for i in range(len(points) - 1):
+            p1 = points[i]
+            p2 = points[i+1]
+            if load <= p2[0]:
+                # 線形補間
+                ratio = (load - p1[0]) / (p2[0] - p1[0])
+                r = int(p1[1] + (p2[1] - p1[1]) * ratio)
+                g = int(p1[2] + (p2[2] - p1[2]) * ratio)
+                b = int(p1[3] + (p2[3] - p1[3]) * ratio)
+                return [r, g, b]
+        return [255, 0, 0] # Fallback
+
     def _derive_status(self, temp, load):
         """ 現在の温度・負荷から Thermal State を導出する """
-        mode = self.config["metric_mode"]
-        val = temp if mode == "temperature" else load
-        check_key = "max_temp" if mode == "temperature" else "max_load"
+        # ファン制御は温度ベースで固定
+        check_val = temp
+        check_key = "max_temp"
         
         for state in self.config["states"]:
-            if val <= state[check_key]:
+            if check_val <= state[check_key]:
                 return state
         return self.config["states"][-1] # Fallback (最大危険状態)
 
@@ -209,7 +234,12 @@ class SystemThermalController:
         if state["label"] != self.current_status_label:
             logger.info(f"SystemThermalController: State Change -> {state['label']} (Temp={temp:.1f}C, Load={load:.1f}%)")
         self.current_status_label = state["label"]
-        self.target_rgb = state["rgb"]
+        
+        # RGBの決定 (metric_mode が load ならグラデーション)
+        if self.config["metric_mode"] == "load":
+            self.target_rgb = self._calc_gradient_rgb(load)
+        else:
+            self.target_rgb = state["rgb"]
 
         # 2. ファンDutyの決定
         self.target_duty = self._map_temp_to_fan_target(temp)
