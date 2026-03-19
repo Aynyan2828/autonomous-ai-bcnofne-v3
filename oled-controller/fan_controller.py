@@ -83,7 +83,7 @@ class SystemThermalController:
             return
             
         try:
-            from rpi_ws281x import PixelStrip
+            from rpi_ws281x import PixelStrip, ws
             # ZP-0129の標準設定 (ファン+基板上のムードライト)
             LED_COUNT      = 4       # 実際のLED数に合わせて後から増減可能
             LED_PIN        = 18      # GPIO18 (PWM0)
@@ -92,11 +92,13 @@ class SystemThermalController:
             LED_BRIGHTNESS = 255     
             LED_INVERT     = False   
             LED_CHANNEL    = 0       
+            # WS2812Bは一般的にGRB順序のため明示指定
+            LED_STRIP      = ws.WS2811_STRIP_GRB 
             
-            self.strip = PixelStrip(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL)
+            self.strip = PixelStrip(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL, LED_STRIP)
             self.strip.begin()
             
-            logging.info("SystemThermalController: WS281x RGB hardware initialized on GPIO 18.")
+            logging.info("SystemThermalController: WS281x RGB hardware initialized (GRB Mode) on GPIO 18.")
         except ImportError:
             logging.warning("SystemThermalController: 'rpi_ws281x' module missing. RGB Disabled. (Install via: sudo pip3 install rpi_ws281x)")
             self.config['rgb_enabled'] = False
