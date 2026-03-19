@@ -116,8 +116,10 @@ class SystemThermalController:
             
         try:
             from rpi_ws281x import Color
+            # デバッグログ追加
+            logging.info(f"SystemThermalController: Setting RGB -> {rgb_list}")
+            
             # ZP-0129のWS281Bへ色送信
-            # ※色順がおかしい場合は rgb_list[1], rgb_list[0], rgb_list[2] に変更してください
             color_val = Color(int(rgb_list[0]), int(rgb_list[1]), int(rgb_list[2]))
             for i in range(self.strip.numPixels()):
                 self.strip.setPixelColor(i, color_val)
@@ -198,6 +200,8 @@ class SystemThermalController:
 
         # 1. 状態の決定
         state = self._derive_status(temp, load)
+        if state["label"] != self.current_status_label:
+            logging.info(f"SystemThermalController: State Change -> {state['label']} (Temp={temp:.1f}C, Load={load:.1f}%)")
         self.current_status_label = state["label"]
         self.target_rgb = state["rgb"]
 

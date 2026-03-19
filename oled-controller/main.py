@@ -338,6 +338,10 @@ def control_fan(temp):
         try:
             fan_ctrl.update(temp)
             fan_status = fan_ctrl.get_status()
+            # 状態変化時のみログを出力
+            if fan_status["status"] != getattr(control_fan, "last_label", ""):
+                control_fan.last_label = fan_status["status"]
+                logger.info(f"OLED/FAN: Status Changed -> {fan_status['status']} (Temp:{temp:.1f}C, Duty:{fan_status['duty']}%)")
         except Exception as e:
             logger.error(f"OLED/FAN: Fan control error: {e}")
 
@@ -448,16 +452,23 @@ def update_oled(db: Session):
             "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         ]
-        font = None
-        for p in jp_font_paths:
-            if os.path.exists(p):
-                font = ImageFont.truetype(p, 10)
-                break
-        if not font:
-            font = ImageFont.load_default()
-            print("[OLED] WARN: No TrueType font found, using default. Japanese may not render.")
+        if not hasattr(update_oled, "font_cache"):
+            update_oled.font_cache = None
+
+        if update_oled.font_cache:
+            font = update_oled.font_cache
         else:
-            print(f"[OLED] INFO: Font loaded from {p}")
+            font = None
+            for p in jp_font_paths:
+                if os.path.exists(p):
+                    font = ImageFont.truetype(p, 10)
+                    break
+            if not font:
+                font = ImageFont.load_default()
+                logger.warning("OLED: No TrueType font found, using default.")
+            else:
+                logger.info(f"OLED: Font loaded and cached from {p}")
+                update_oled.font_cache = font
     except Exception as e:
         logger.error(f"Failed to load font: {e}")
         font = ImageFont.load_default()
