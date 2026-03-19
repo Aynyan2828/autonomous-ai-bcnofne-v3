@@ -9,14 +9,14 @@ logger = ShipLogger("oled-fan")
 # ------------------------------------------------------------------------
 CONFIG = {
     "metric_mode": "load", # 'temperature' or 'load' (RGB based on load, Fan based on temp)
-    "update_interval": 1.0,       # 制御・計算の更新周期
+    "update_interval": 0.1,       # 制御・計算の更新周期 (0.1s に短縮してレスポンス向上)
     "fan_min_duty": 30,
     "fan_max_duty": 100,
     "fan_temp_min": 40,
     "fan_temp_max": 60,
     "duty_step": 5,               # 1回の更新で変化できるDuty最大幅
     "rgb_enabled": True,          # ハード未接続時は初期化で自動Falseにフォールバックさせます
-    "rgb_smoothing_step": 50,     # RGB値(0-255)の最大変化量/回 (値を大きくすると変化が早くなります)
+    "rgb_smoothing_step": 100,    # RGB値(0-255)の最大変化量/回 (値を大きくすると変化が早くなります)
     "states": [
         {"max_temp": 40, "max_load": 10, "label": "DOCKED",        "rgb": [0, 0, 255]},       # 青
         {"max_temp": 50, "max_load": 30, "label": "CRUISING",      "rgb": [0, 255, 255]},     # 水色
