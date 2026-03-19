@@ -60,7 +60,8 @@ class SystemThermalController:
         """ ファン制御・RPM測定に加え、RGBハードウェアの初期化を行う """
         if self.pi.connected:
             self.pi.set_mode(self.pwm_pin, pigpio.OUTPUT)
-            self.pi.set_PWM_frequency(self.pwm_pin, 25000) # 25kHz標準
+            # 周波数を下げて RGB (PWM0) とのクロック干渉を最小限に抑える (100Hz)
+            self.pi.set_PWM_frequency(self.pwm_pin, 100) 
             self.pi.set_PWM_range(self.pwm_pin, 100)
             self.pi.set_PWM_dutycycle(self.pwm_pin, self.current_duty)
             
