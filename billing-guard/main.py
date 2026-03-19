@@ -103,7 +103,7 @@ def calculate_days_from_start(install_date_str: str) -> int:
         return 0
 
 def is_special_day(days: int) -> bool:
-    return days % 6 == 0
+    return days > 0 and days % 6 == 0
 
 def enforce_limits(db: Session):
     """課金上限チェック"""
@@ -159,7 +159,7 @@ async def billing_monitor_task():
             db.close()
         except Exception as e:
             print(f"Error in billing monitor: {e}")
-        await asyncio.sleep(600)
+        await asyncio.sleep(60)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -232,6 +232,9 @@ def record_usage(model: str = "gpt-4o-mini", input_tokens: int = 500, output_tok
     _set_state(db, "billing_cost_jpy", str(round(new_cost, 4)))
     _set_state(db, "billing_requests", str(new_requests))
     _set_state(db, "billing_total_cost_jpy", str(round(new_total, 4)))
+    
+    # 即座に閾値チェックを実行
+    enforce_limits(db)
     
     logger.info(f"Recorded: {model} in={input_tokens} out={output_tokens} +{cost_jpy:.4f}円 (today: {new_cost:.2f}円, total: {new_total:.2f}円, #{new_requests})")
     
