@@ -1,6 +1,7 @@
 import pigpio
 import time
-from shared.logger import logger
+from shared.logger import ShipLogger
+logger = ShipLogger("oled-fan")
 
 # ------------------------------------------------------------------------
 # 設定
