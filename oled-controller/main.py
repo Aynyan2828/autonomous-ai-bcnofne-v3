@@ -265,15 +265,26 @@ def setup_hardware():
     # pigpio Setup
     try:
         # Docker環境からホストの pigpiod に接続するための設定
-        # 1. 環境変数を優先 2. 特殊なホスト名 3. デフォルト
         pigpio_host = os.getenv("PIGPIO_ADDR", "localhost")
-        
         pi = pigpio.pi(pigpio_host)
         
-        # もし localhost で接続失敗し、かつ環境変数が未設定なら、Docker Gateway を試行
+        # もし localhost で接続失敗し、かつ環境変数が未設定なら、Gateway IPを動的取得して試行
         if not pi.connected and pigpio_host == "localhost":
-            logger.info("OLED/FAN: Retrying pigpiod on 172.17.0.1 (Docker bridge)...")
-            pi = pigpio.pi("172.17.0.1")
+            logger.info("OLED/FAN: localhost failed. Trying to find Docker bridge gateway...")
+            import subprocess
+            try:
+                # Docker内からホスト側(Gateway)のIPを自動取得する
+                gateway_ip = subprocess.check_output("ip -4 route show default | awk '{print $3}'", shell=True).decode().strip()
+                if gateway_ip:
+                    logger.info(f"OLED/FAN: Found gateway IP: {gateway_ip}, retrying pigpiod...")
+                    pi = pigpio.pi(gateway_ip)
+            except Exception as e:
+                logger.warning(f"OLED/FAN: Failed to get gateway IP. ({e})")
+                
+            # それでもダメなら従来の固定IPフォールバック
+            if not pi.connected:
+                logger.info("OLED/FAN: Retrying pigpiod on 172.17.0.1 (Docker default bridge)...")
+                pi = pigpio.pi("172.17.0.1")
 
         if not pi.connected:
             logger.warning("OLED/FAN: pigpiod not running or unreachable. Fan control will be stubbed.")
