@@ -17,8 +17,8 @@ def test_fan():
     from fan_controller import SystemThermalController
 
     try:
-        logging.info("Creating SystemThermalController instance (PWM=12, TACH=24)...")
-        controller = SystemThermalController(pi, pwm_pin=12, tach_pin=24)
+        logging.info("Creating SystemThermalController instance (PWM=13, TACH=24)...")
+        controller = SystemThermalController(pi, pwm_pin=13, tach_pin=24)
         
         logging.info("Controller created. Entering test loop (Simulating temp=55°C, Blue->Green).")
         logging.info("Press Ctrl+C to exit and stop the test.")

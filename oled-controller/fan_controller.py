@@ -32,8 +32,10 @@ class SystemThermalController:
     BCNOFNe v3: 統合型 4-pin PWM Fan & RGB Controller
     システム熱状態(Thermal State)から、ファンとRGBを安全かつ連動して制御します。
     """
-    def __init__(self, pi, pwm_pin=12, tach_pin=24): # ユーザー配線: Fan PWM=12, TACH=24 / RGB=18
+    def __init__(self, pi, pwm_pin=13, tach_pin=24): # ユーザー配線: Fan PWM=13, TACH=24 / RGB=18
         self.pi = pi
+        self.cb = None
+        self.strip = None
         self.pwm_pin = pwm_pin
         self.tach_pin = tach_pin
         self.config = CONFIG
@@ -78,8 +80,8 @@ class SystemThermalController:
         if not self.config['rgb_enabled']:
             return
             
-        if self.pwm_pin == 18:
-            logger.error("SystemThermalController: PWM pin 18 CONFLICTS with WS281x RGB on ZP-0129. RGB Disabled.")
+        if self.pwm_pin in [12, 18]:
+            logger.error(f"SystemThermalController: PWM pin {self.pwm_pin} CONFLICTS with WS281x RGB (on PWM Channel 0) on ZP-0129. RGB Disabled.")
             self.config['rgb_enabled'] = False
             return
             
@@ -100,6 +102,8 @@ class SystemThermalController:
             self.strip.begin()
             
             logger.info("SystemThermalController: WS281x RGB hardware initialized (GRB Mode) on GPIO 18.")
+            # 起動時の同期: 最初の一回を強制反映
+            self._apply_rgb_hardware(self.current_rgb)
         except ImportError:
             logger.warning("SystemThermalController: 'rpi_ws281x' module missing. RGB Disabled.")
             self.config['rgb_enabled'] = False
@@ -238,7 +242,7 @@ class SystemThermalController:
         """ 終了時のフェイルセーフ処理 """
         if self.pi.connected:
             self.pi.set_PWM_dutycycle(self.pwm_pin, 100) # ファン全開
-            if hasattr(self, 'cb'): 
+            if self.cb: 
                 self.cb.cancel()
             
             # RGBフェイルセーフ (異常を示す赤色に固定、またはトラブル時は消灯)
@@ -257,7 +261,7 @@ class FanController(SystemThermalController):
     既存の `FanController` インスタンス化の互換性を保つためのラッパー。
     そのまま置き換え可能です。
     """
-    def __init__(self, pi, pwm_pin=12, tach_pin=24): # ユーザー配線: PWM=12, TACH=24
+    def __init__(self, pi, pwm_pin=13, tach_pin=24): # ユーザー配線: PWM=13, TACH=24
         super().__init__(pi, pwm_pin, tach_pin)
 
     # 上位の update() が tempとload(デフォルト0.0) を受け取るため

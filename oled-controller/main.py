@@ -58,7 +58,7 @@ app = FastAPI(title="BCNOFNe OLED & Fan Controller")
 # Configuration Constants
 OLED_WIDTH = 128
 OLED_HEIGHT = 64
-FAN_PWM_PIN = 12
+FAN_PWM_PIN = 13 # Move from 12 to 13 to avoid conflict with RGB (GPIO 18) on PWM Channel 0
 FAN_TACH_PIN = 24
 TEMP_THRESHOLD_HIGH = 60.0 # 100% Duty
 TEMP_THRESHOLD_LOW = 40.0  # 30% Duty
