@@ -9,3 +9,4 @@ adafruit-blinka
 Pillow
 httpx
 pigpio
+rpi_ws281x
