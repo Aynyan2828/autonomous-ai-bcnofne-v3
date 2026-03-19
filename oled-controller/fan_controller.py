@@ -16,7 +16,7 @@ CONFIG = {
     "fan_temp_max": 60,
     "duty_step": 5,               # 1回の更新で変化できるDuty最大幅
     "rgb_enabled": True,          # ハード未接続時は初期化で自動Falseにフォールバックさせます
-    "rgb_smoothing_step": 10,     # RGB値(0-255)の最大変化量/回
+    "rgb_smoothing_step": 50,     # RGB値(0-255)の最大変化量/回 (値を大きくすると変化が早くなります)
     "states": [
         {"max_temp": 40, "max_load": 10, "label": "DOCKED",        "rgb": [0, 0, 255]},       # 青
         {"max_temp": 50, "max_load": 30, "label": "CRUISING",      "rgb": [0, 255, 255]},     # 水色
