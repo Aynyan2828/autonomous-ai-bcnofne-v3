@@ -3,7 +3,7 @@ backend: local
 providers:
   local:
     type: ollama
-    base_url: http://100.93.252.91:11434
+    base_url: http://ollama:11434
   openai:
     type: openai
     api_key_env: OPENAI_API_KEY
