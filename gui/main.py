@@ -70,27 +70,27 @@ async def read_dashboard(request: Request):
             })
         
         db.close()
+
+        # 課金情報の取得
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get("http://billing-guard:8002/status", timeout=2.0)
+                if resp.status_code == 200:
+                    billing_data.update(resp.json())
+        except Exception as e:
+            print(f"Billing access error: {e}")
+
+        return templates.TemplateResponse("index.html", {
+            "request": request,
+            "system_states": system_states,
+            "billing_data": billing_data,
+            "logs": logs,
+            "proposals": proposals
+        })
     except Exception as e:
-        print(f"DB access error: {e}")
         import traceback
-        traceback.print_exc()
-
-    # 課金情報の取得
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get("http://billing-guard:8002/status", timeout=2.0)
-            if resp.status_code == 200:
-                billing_data = resp.json()
-    except Exception as e:
-        print(f"Billing access error: {e}")
-
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "system_states": system_states,
-        "billing_data": billing_data,
-        "logs": logs,
-        "proposals": proposals
-    })
+        error_info = traceback.format_exc()
+        return HTMLResponse(content=f"<h1>AYN Emergency Dashboard (Error)</h1><pre>{error_info}</pre>", status_code=500)
 
 @app.get("/api/workspace-file")
 async def get_workspace_file(path: str):
