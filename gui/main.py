@@ -25,7 +25,13 @@ def health_check():
 @app.get("/", response_class=HTMLResponse)
 async def read_dashboard(request: Request):
     system_states = []
-    billing_data = {"is_special_day": False, "current_cost_jpy": 0.0, "alert_level": "UNKNOWN"}
+    billing_data = {
+        "is_special_day": False, 
+        "current_cost_jpy": 0.0, 
+        "total_cost_jpy": 0.0,
+        "request_count": 0, 
+        "alert_level": "UNKNOWN"
+    }
     logs = []
     proposals = []
 
