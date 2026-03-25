@@ -80,13 +80,16 @@ async def read_dashboard(request: Request):
         except Exception as e:
             print(f"Billing access error: {e}")
 
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "system_states": system_states,
-            "billing_data": billing_data,
-            "logs": logs,
-            "proposals": proposals
-        })
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                "system_states": system_states,
+                "billing_data": billing_data,
+                "logs": logs,
+                "proposals": proposals
+            }
+        )
     except Exception as e:
         import traceback
         error_info = traceback.format_exc()
