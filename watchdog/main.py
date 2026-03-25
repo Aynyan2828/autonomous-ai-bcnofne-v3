@@ -54,8 +54,8 @@ async def monitor_services():
                 except Exception as e:
                     log_event("ERROR", f"未知の監視エラー ({service['name']}): {e}")
             
-            # 1分おきに監視
-            await asyncio.sleep(60)
+            # 6時間おきに監視 (21600秒)
+            await asyncio.sleep(6 * 3600)
 
 async def execute_restart():
     """実際のコンテナ再起動処理"""
