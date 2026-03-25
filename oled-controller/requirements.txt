@@ -10,3 +10,4 @@ Pillow
 httpx
 pigpio
 rpi-ws281x
+PyYAML

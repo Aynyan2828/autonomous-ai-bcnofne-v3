@@ -13,8 +13,10 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 COPY oled-controller/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
+RUN pip install --no-cache-dir -r requirements.txt PyYAML
+COPY llm/ ./llm/
+COPY config/ ./config/
+COPY prompts/ ./prompts/
 COPY shared/ ./shared/
 COPY oled-controller/ ./oled-controller/
 
