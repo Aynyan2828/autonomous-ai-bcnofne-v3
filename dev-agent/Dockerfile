@@ -8,12 +8,15 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 COPY dev-agent/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt pyyaml
 
 # ソースコードとワークスペースのマウントポイント
 RUN mkdir -p /app/src /app/workspace
 
 COPY shared/ ./shared/
+COPY llm/ ./llm/
+COPY config/ ./config/
+COPY prompts/ ./prompts/
 COPY dev-agent/ ./dev-agent/
 
 ENV PYTHONPATH=/app
