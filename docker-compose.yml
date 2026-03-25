@@ -26,6 +26,29 @@ services:
       - "8000:8000"
     depends_on:
       - billing-guard
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: shipos-ollama
+    restart: unless-stopped
+    volumes:
+      - ./data/ollama:/root/.ollama
+    environment:
+      - TZ=Asia/Tokyo
+      - OLLAMA_HOST=0.0.0.0
+    # GPUを使う場合は以下のコメントアウトを外す（NVIDIA Container Toolkitが必要）
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    networks:
+      - shipos-net
+    ports:
+      - "11434:11434"
 
   line-gateway:
     <<: *common

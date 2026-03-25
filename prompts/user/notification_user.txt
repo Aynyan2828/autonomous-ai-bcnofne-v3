@@ -1,0 +1,17 @@
+以下の内容を通知文に変換してください。
+
+出力形式:
+{
+  "title": "",
+  "body": "",
+  "priority": "low|medium|high"
+}
+
+制約:
+- title は30文字以内
+- body は80文字以内
+- 短くわかりやすく
+- JSONのみ返す
+
+入力:
+{{input_text}}

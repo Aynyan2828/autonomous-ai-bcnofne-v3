@@ -1,0 +1,10 @@
+[
+  {
+    "input": "BCNOFNe v3 のローカルAI化では、OpenAI依存を減らし、Piを司令塔として別ホスト推論する設計を採用する。",
+    "output": {
+      "summary": "BCNOFNe v3 は OpenAI依存を減らし、Pi司令塔＋別ホスト推論へ移行する。",
+      "keywords": ["BCNOFNe v3", "ローカルAI化", "別ホスト推論"],
+      "importance": "high"
+    }
+  }
+]

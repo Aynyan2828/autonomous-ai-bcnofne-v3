@@ -1,0 +1,10 @@
+[
+  {
+    "input": "billing guard が本日の利用額上限に近づいています。",
+    "output": {
+      "title": "課金上限に接近",
+      "body": "billing guard が本日の上限近くです。確認してください。",
+      "priority": "high"
+    }
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "input": "至急ご確認ください。明日までにご返信をお願いします。",
+    "output": {
+      "primary_label": "reply_needed",
+      "secondary_labels": ["important"],
+      "confidence": 0.96,
+      "reason": "返信期限あり"
+    }
+  },
+  {
+    "input": "今だけ50%OFF。会員限定セール開催中。",
+    "output": {
+      "primary_label": "promo",
+      "secondary_labels": [],
+      "confidence": 0.98,
+      "reason": "販促内容"
+    }
+  }
+]

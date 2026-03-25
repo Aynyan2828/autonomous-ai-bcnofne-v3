@@ -1,0 +1,86 @@
+version: 1
+
+tasks:
+  chat:
+    system_prompt: system/chat_system.txt
+    user_prompt: user/chat_user.txt
+    fewshot: null
+    output_mode: text
+    retry_strategy: simple_retry
+
+  summary:
+    system_prompt: system/summary_system.txt
+    user_prompt: user/summary_user.txt
+    fewshot: fewshot/summary_examples.json
+    output_mode: json
+    retry_strategy: json_retry
+
+  chunk_summary:
+    system_prompt: system/summary_system.txt
+    user_prompt: user/chunk_summary_user.txt
+    fewshot: null
+    output_mode: json
+    retry_strategy: json_retry
+
+  final_summary:
+    system_prompt: system/summary_system.txt
+    user_prompt: user/final_summary_user.txt
+    fewshot: fewshot/summary_examples.json
+    output_mode: json
+    retry_strategy: json_retry
+
+  classification:
+    system_prompt: system/classification_system.txt
+    user_prompt: user/classification_user.txt
+    fewshot: fewshot/classification_examples.json
+    output_mode: json
+    retry_strategy: json_retry
+
+  notification:
+    system_prompt: system/notification_system.txt
+    user_prompt: user/notification_user.txt
+    fewshot: fewshot/notification_examples.json
+    output_mode: json
+    retry_strategy: json_retry
+
+  code:
+    system_prompt: system/code_system.txt
+    user_prompt: user/code_user.txt
+    fewshot: null
+    output_mode: json
+    retry_strategy: code_retry
+
+  repair:
+    system_prompt: system/repair_system.txt
+    user_prompt: user/json_repair_user.txt
+    fewshot: null
+    output_mode: json
+    retry_strategy: repair_only
+
+  goal:
+    system_prompt: system/goal_system.txt
+    user_prompt: user/goal_user.txt
+    fewshot: null
+    output_mode: json
+    retry_strategy: json_retry
+
+  proactive:
+    system_prompt: system/proactive_system.txt
+    user_prompt: user/proactive_user.txt
+    fewshot: null
+    output_mode: text
+    retry_strategy: simple_retry
+
+  observation:
+    system_prompt: system/observation_system.txt
+    user_prompt: user/observation_user.txt
+    fewshot: null
+    output_mode: json
+    retry_strategy: json_retry
+
+  activity_report:
+    system_prompt: system/activity_report_system.txt
+    user_prompt: user/activity_report_user.txt
+    fewshot: null
+    output_mode: text
+    retry_strategy: simple_retry

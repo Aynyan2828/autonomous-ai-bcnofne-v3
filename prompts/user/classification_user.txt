@@ -1,0 +1,25 @@
+以下の本文を分類してください。
+
+分類候補:
+- important
+- reply_needed
+- notification
+- promo
+- spam_suspected
+- archive
+
+出力形式:
+{
+  "primary_label": "",
+  "secondary_labels": [],
+  "confidence": 0.0,
+  "reason": ""
+}
+
+制約:
+- 候補外ラベル禁止
+- reason は短く
+- JSONのみ返す
+
+本文:
+{{input_text}}

@@ -16,12 +16,10 @@ from shared.bilingual_formatter import format_bilingual
 # データベース初期化
 init_db()
 from datetime import datetime, timezone, timedelta
-from openai import OpenAI
-
-logger = ShipLogger("memory-service")
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from llm import get_llm_executor
 
 app = FastAPI(title="shipOS Memory Service")
+logger = ShipLogger("memory-service")
 
 # 起動時にデータベース（SSD/HDD両方）を準備
 db_ssd = SessionLocal()
@@ -173,7 +171,7 @@ def get_lessons(limit: int = 10, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/memories/reflect")
-def reflect_memories(db: Session = Depends(get_db)):
+async def reflect_memories(db: Session = Depends(get_db)):
     """
     1日の終わりに動作し、直近の WORKING / EPISODIC な記憶を要約して
     REFLECTIVE な記憶として沈殿（保存）させる Job エンドポイント。
@@ -191,23 +189,13 @@ def reflect_memories(db: Session = Depends(get_db)):
     mem_texts = [f"- [{m.topic}] {m.content}" for m in recent_memories]
     mem_context = "\n".join(mem_texts)
 
-    prompt = f"""
-あなたは AYN です。これらは直近24時間のあなたの作業や出来事の記憶（WORKING / EPISODIC）です。
-これらを振り返り（Reflection）、今後の航海や自己改善に役立つ「教訓」「気づき」「パターンの抽象化」を生成してください。
-細かい出来事の羅列ではなく、より高次な洞察（REFLECTIVE）に変換してください。
-必ず「日本語\n英語」のバイリンガルフォーマットで出力してください。
-
-【記憶一覧】
-{mem_context}
-"""
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
-            temperature=0.7
+        # テンプレート化されたプロンプト管理構成経由で要約を実行
+        executor = await get_llm_executor()
+        result = await executor.execute_summarization(
+            text=mem_context
         )
-        reflection_text = response.choices[0].message.content.strip()
+        reflection_text = result.final_summary
         
         # REFLECTIVE メモリとして保存
         new_memory = Memory(

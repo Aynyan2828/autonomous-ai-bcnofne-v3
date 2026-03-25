@@ -45,8 +45,8 @@ async def monitor_services():
         while True:
             for service in SERVICES_TO_MONITOR:
                 try:
-                    # ヘルスチェックのタイムアウトは短めに設定
-                    response = await client.get(service["url"], timeout=3.0)
+                    # ヘルスチェックのタイムアウトは、LLM処理中を考慮して少し長めに設定
+                    response = await client.get(service["url"], timeout=10.0)
                     if response.status_code != 200:
                         log_event("WARN", f"サービス {service['name']} が異常を報告しました。Status: {response.status_code}")
                 except httpx.RequestError as exc:

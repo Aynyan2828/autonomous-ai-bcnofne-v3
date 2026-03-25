@@ -11,7 +11,7 @@ import difflib
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends
 from pydantic import BaseModel
-from openai import AsyncOpenAI
+from llm import get_llm_executor
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared import init_db
@@ -27,20 +27,14 @@ print(f"AYN {VERSION} STARTING... (CWD: {os.getcwd()})")
 
 logger = ShipLogger("dev-agent")
 app = FastAPI(title="BCNOFNe Dev Agent")
-openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# LLM プロバイダーの初期化は呼び出し時に行う
 
 async def _report_billing(response, model: str = "gpt-4o-mini"):
-    """OpenAI 呼び出し後に billing-guard に使用量を報告する"""
-    try:
-        usage = getattr(response, 'usage', None)
-        input_tokens = usage.prompt_tokens if usage else 500
-        output_tokens = usage.completion_tokens if usage else 500
-        async with httpx.AsyncClient() as client:
-            await client.post("http://billing-guard:8002/record",
-                            params={"model": model, "input_tokens": input_tokens, "output_tokens": output_tokens},
-                            timeout=2.0)
-    except Exception:
-        pass
+    """
+    (Deprecated) OpenAI 呼び出し後に billing-guard に使用量を報告する
+    現在は shared.llm.OpenAIProvider 内で自動的に行われる。
+    """
+    pass
 
 SRC_DIR = "/app/src"
 WORKSPACE_DIR = "/app/workspace"
@@ -570,52 +564,21 @@ async def run_autonomous_observation():
         logger.info("Too many pending proposals. Skipping observation.")
         return "skipped"
 
-    # 2. OpenAI による分析
-    prompt = f"""
-あなたは shipOS の主任整備士 AYN です。システムの健全性と利便性を高めるのが任務です。
-現在の脳内コンテキスト、障害統計、およびリポジトリ構成を確認して、改善が必要な箇所を「最大3つ」挙げてください。
-
-【現在の脳内コンテキスト】
-{brain_context}
-
-【過去の教訓 (Lessons Learned)】
-{past_lessons_text}
-
-{failure_summary}
-
-{repo_map}
-
-【任務】
-1. 障害統計、記憶、および過去の教訓から、ボトルネックや修正が必要な箇所を特定してください。
-2. 過去の失敗や教訓を活かし、同じ間違いを繰り返さないような堅牢な計画を立ててください。
-3. 修正候補を最大3つ挙げ、それぞれの「選定理由」「自信度(0.0-1.0)」「修正計画」を考えてください。
-4. 最も優先度・自信度が高いものをプライマリとして提案してください。
-5. 必ず日本語と英語の両方のテキストを生成してください。
-
-出力は以下の JSON 形式で答えてください：
-{{
-  "candidates": [
-    {{
-      "title_ja": "改善のタイトル (日本語)",
-      "title_en": "Improvement title (English)",
-      "description_ja": "なぜこれが必要か (日本語)",
-      "description_en": "Why this is needed (English)",
-      "files": ["修正ファイルパス1", "..."],
-      "plan": "具体的な修正内容の指示",
-      "reason": "このファイルを選んだ技術的・論理的理由",
-      "confidence": 0.9
-    }}
-  ]
-}}
-"""
     try:
-        response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={ "type": "json_object" }
+        # テンプレート化されたプロンプト管理構成経由で観測・分析を実行
+        executor = await get_llm_executor()
+        
+        variables = {
+            "brain_context": brain_context,
+            "past_lessons": past_lessons_text,
+            "failure_summary": failure_summary,
+            "repo_map": repo_map
+        }
+        
+        res_data = await executor.execute_json(
+            task_type="observation",
+            variables=variables
         )
-        res_data = json.loads(response.choices[0].message.content)
-        await _report_billing(response, "gpt-4o-mini")
         
         candidates = res_data.get("candidates", [])
         if not candidates:
@@ -708,30 +671,34 @@ async def process_suggestion(suggestion):
             # 周辺文脈の取得
             relevant_context = await get_relevant_context(f, suggestion["plan"])
 
-            edit_prompt = f"""
-ファイル: {f}
-修正計画: {suggestion['plan']}
-現在の試行回数: {attempt}/{max_attempts}
-
-【周辺文脈 (参考情報)】
-{relevant_context}
-
-【指示】
-周辺文脈を参考にしつつ、指定されたファイルの「完全な新しいコード」を返してください。
-"""
+            # テンプレート化されたプロンプト管理構成経由でコード修正を実行
+            executor = await get_llm_executor()
+            
+            variables = {
+                "file_path": f,
+                "plan": suggestion['plan'],
+                "relevant_context": relevant_context,
+                "base_code": base_code_for_ai,
+                "attempt": f"{attempt}/{max_attempts}"
+            }
             if errors_feedback_dict:
-                edit_prompt += f"\n【前回までのエラー情報 (構造化)】\n{json.dumps(errors_feedback_dict, indent=2, ensure_ascii=False)}\n特に自分が修正担当しているファイルのエラー箇所を重点的に直してください。"
+                variables["error_feedback"] = json.dumps(errors_feedback_dict, indent=2, ensure_ascii=False)
+            else:
+                variables["error_feedback"] = "なし"
 
-            edit_prompt += f"\n\n【ベースコード】\n{base_code_for_ai}\n\n余計な解説は不要です。コードのみ出力してください。"
-
-            res = await openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": edit_prompt}]
+            new_code = await executor.execute_text(
+                task_type="code",
+                variables=variables
             )
-            new_code = res.choices[0].message.content.strip()
-            await _report_billing(res, "gpt-4o")
+            
             if new_code.startswith("```"):
-                new_code = "\n".join(new_code.split("\n")[1:-1])
+                # Markdown形式で返ってきた場合のクリーンアップ
+                lines = new_code.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                new_code = "\n".join(lines).strip()
             
             with open(work_path, "w") as f_out:
                 f_out.write(new_code)

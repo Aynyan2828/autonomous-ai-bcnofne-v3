@@ -1,0 +1,30 @@
+prompt_rules:
+  enforce_json_only: true
+  forbid_markdown_code_fence: true
+  forbid_extra_text: true
+
+chunking:
+  enabled: true
+  default_chunk_size: 1800
+  default_overlap: 200
+  max_chunks: 12
+
+retry:
+  normal_attempts: 1
+  json_attempts: 2
+  repair_attempts: 1
+
+fewshot:
+  enabled: true
+  max_examples: 3
+
+rendering:
+  strict_variable_check: true
+  trim_whitespace: true
+
+logging:
+  log_prompt_name: true
+  log_task_type: true
+  log_model_name: true
+  log_retry_count: true
+  log_repair_trigger: true

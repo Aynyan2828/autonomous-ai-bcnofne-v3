@@ -54,6 +54,7 @@ The core personality, **AYN**, is not a static chatbot. She is an AI lifeform wi
 *   📡 **Omni-Channel Gateway / オムニチャネル接続**: Integrated with **LINE** and **Discord** for remote commanding. / LINEやDiscordを通じたリモート指令に対応。
 *   🌐 **Browser Automation / ブラウザ自動操作**: Powered by Playwright for autonomous web research. / Playwrightによる自律的なウェブ調査能力。
 *   🛡️ **Billing Guard / 課金安全装置**: A fail-safe system to prevent unexpected API costs. / 予期せぬAPIコストの暴走を防ぐフェイルセーフ機構。
+*   🚀 **Local AI First (Ollama) / ローカルAI優先**: Fully integrated with Ollama for 7B models, ensuring faster thinking and offline privacy. / Ollamaとの統合により、7Bモデルをローカルで実行。高速な思考とプライバシーを両立。
 *   📖 **Autonomous Diary / 航海日誌自動生成**: AI generates daily ship logs based on system events and interactions. / システムイベントや対話に基づき、AIが日々の航海日誌を自動生成。
 *   📡 **DNS Watchtower / DNS統合監視**: Unified monitoring of AdGuard Home, Pi-hole, and Unbound with AI summaries. / AdGuard Home, Pi-hole, Unboundを統合監視し、AIが日次要約。
 
@@ -80,6 +81,8 @@ graph TB
         BG["billing-guard (Safety)"]
         DS["diary-service"]
         BA["browser-agent (Web)"]
+        OL["ollama (Local LLM)"]
+        WD["watchdog (Stability)"]
         OLED["oled-controller (HW)"]
     end
 
@@ -99,6 +102,8 @@ graph TB
     LINE <--> LG <--> Core
     Core <--> MS
     Core <--> DA
+    Core <--> OL
+    Core -- Monitor --> WD
     DA --> GitHub
     Core --> OLED --> Disp
     Core -- Monitoring --> AGH
@@ -142,7 +147,7 @@ Inspired by cognitive science, AYN integrates information through 7 distinct lay
 | :--- | :--- |
 | **Language / 言語** | Python 3.11 |
 | **Backend / バックエンド** | FastAPI / Uvicorn |
-| **AI / LLM** | OpenAI GPT-4o (via AsyncOpenAI) |
+| **AI / LLM** | OpenAI GPT-4o / Ollama (Qwen2.5:7b) |
 | **Container / コンテナ** | Docker / Docker Compose |
 | **Automation / 自動化** | Playwright (browser-agent) |
 | **Database / DB** | SQLAlchemy / SQLite |
@@ -172,10 +177,10 @@ bash start.sh
 
 ## 🗺️ Roadmap / ロードマップ
 
+- [x] **Local LLM (ローカルLLM)**: Fully integrated with Ollama for 100% offline flight experiments. / Ollamaとの統合により100%オフライン航行の基盤を構築。
 - [ ] **Autonomous Testing (自律テスト)**: AI writes and runs unit tests before applying code. / コード適用前にAIが自らユニットテストを記述・実行。
 - [ ] **Plugin Architecture (プラグイン機能)**: Modular "Skills" installation system. / モジュール化された「スキル」のインストールシステム。
 - [ ] **Distributed Nodes (分散ノード)**: Communication protocol for multiple BCNOFNe ships. / 複数のBCNOFNe船同士の通信プロトコル。
-- [ ] **Local LLM (ローカルLLM)**: Optional integration with Ollama for 100% offline flight. / Ollama等との統合による100%オフライン航行の選択肢。
 
 ---
 

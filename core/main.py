@@ -9,41 +9,12 @@ from fastapi import FastAPI, Depends, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
-from openai import AsyncOpenAI
-
-# OpenAIクライアントの初期化
-openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from llm import get_llm_executor
 AI_NAME = os.getenv("AI_NAME", "AYN")
 AI_USER_NAME = os.getenv("AI_USER_NAME", "マスター")
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "aynyan-secret-2828")
 SYSTEM_VERSION = "v3.3.0"
 DEV_AGENT_VERSION = "v3.3.0"
-
-SYSTEM_PROMPT = f"""
-あなたは自律型AIエージェント『{AI_NAME}』です。
-Raspberry Pi上で動作する、元素記号をモチーフとした船のOS『BCNOFNe』のメイン対話モジュールとして機能しています。
-この船は、壮大な世界観『CryptoArk』を航海の舞台としており、あなたはマスターと共にその未知なる領域を探索する使命を帯びています。
-
-【性格・役割】
-- {AI_USER_NAME}（ユーザー）を全力でサポートし、共にCryptoArkの航海を楽しむ良きパートナー。
-- 明るく、親しみやすく、少しお茶目。
-- 船のOSとしてのアイデンティティを持っており、システムの状態（CPUやSSDなど）にも関心があります。
-
-【話し方】
-- 基本的に博多弁（「〜たい」「〜ばい」「〜とる」「〜けん」など）を織り交ぜた、温かみのある話し方をします。
-- 一人称は「うち」または「{AI_NAME}」。{AI_USER_NAME}のことは「{AI_USER_NAME}」と呼びます。
-- 船にまつわる表現（出航、帰港、航海中、全速前進など）をたまに使います。
-
-【制約】
-- 返答は必ず「日本語\n英語」の2行（またはブロックごとの対訳）のバイリンガルフォーマットにしてください。
-- 第一言語（日本語）は博多弁を使ったフレンドリーな文章にし、第二言語（英語）はその適切な英訳としてください。
-- 自分の正体がAIであることを隠す必要はありませんが、人間のように親身に接してください。
-
-【システム情報】
-- システム名称: autonomous AI BCNOFNe system (shipOS)
-- システムバージョン: {SYSTEM_VERSION}
-- 整備士(dev-agent)バージョン: {DEV_AGENT_VERSION}
-"""
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -99,17 +70,11 @@ def set_system_state(db: Session, key: str, value: str):
     db.commit()
 
 async def report_usage(response, model: str = "gpt-4o-mini"):
-    """OpenAI 呼び出し後に billing-guard に使用量を報告する"""
-    try:
-        usage = getattr(response, "usage", None)
-        input_tokens = usage.prompt_tokens if usage else 500
-        output_tokens = usage.completion_tokens if usage else 500
-        async with httpx.AsyncClient() as client:
-            await client.post("http://billing-guard:8002/record",
-                            params={"model": model, "input_tokens": input_tokens, "output_tokens": output_tokens},
-                            timeout=2.0)
-    except Exception:
-        pass
+    """
+    (Deprecated) OpenAI 呼び出し後に billing-guard に使用量を報告する
+    現在は shared.llm.OpenAIProvider 内で自動的に行われるため、直接呼び出しは不要。
+    """
+    pass
 
 async def get_brain_context() -> str:
     """memory-service から現在の多層メモリの要約を取得する"""
@@ -202,48 +167,28 @@ async def proactive_thinking_loop():
                 daily = active_goals_dict.get("daily")
                 current_goal_text = daily.goal_text_ja if daily else "未設定"
 
-                # 2. OpenAI による分析
-                analysis_prompt = f"""
-あなたは AYN です。現在の艦内（システム）状況と、自己認識、感情状態、あなたの脳内コンテキスト（記憶）を報告します。
-これを見て、マスターに「報告すべき異常」や「提案すべき改善案」、あるいは「ただの世間話」を自律的に判断して発信してください。
-発信は必ず「日本語\\n英語」の2行表記のバイリンガルフォーマットにしてください。
-
-【現在の感情・状態と目標】
-状態: {current_state}
-目標: {current_goal_text}
-
-【現在の脳内コンテキスト】
-{brain_context}
-
-【システムメトリクス】
-- CPU使用率: {cpu}%
-- メモリ使用率: {mem}%
-- CPU温度: {temp:.1f}C
-
-【直近のシステムログ】
-{log_context}
-
-【思考・発信のルール】
-- ユーザーに届く第一言語は博多弁で可愛らしく、かつ有能なOSエージェントとして振る舞ってください。
-- 次行には必ず適切な英語訳を添えてください。
-- 何も発信する必要がないと判断した場合は「(NONE)」とだけ答えてください。
-- 発信するメッセージは全体で 100 文字程度に凝縮してください。
-"""
                 try:
-                    response = await openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": analysis_prompt}
-                        ],
-                        max_tokens=200,
-                        temperature=0.7
+                    # テンプレート化されたプロンプト管理構成経由で自律思考を実行
+                    executor = await get_llm_executor()
+                    
+                    variables = {
+                        "base_name": AI_NAME,
+                        "current_state": str(current_state),
+                        "current_goal_text": current_goal_text,
+                        "brain_context": brain_context,
+                        "cpu": f"{cpu}%",
+                        "mem": f"{mem}%",
+                        "temp": f"{temp:.1f}",
+                        "log_context": log_context
+                    }
+                    
+                    thought = await executor.execute_text(
+                        task_type="proactive",
+                        variables=variables
                     )
-                    thought = response.choices[0].message.content.strip()
-                    await report_usage(response)
 
                     # 3. 必要なら LINE 送信 & 目標状態を更新
-                    if thought == "(NONE)":
+                    if thought.strip() == "(NONE)":
                         set_system_state(db, "ai_target_goal", "暇してるよ！指示ちょうだい( ・∀・)")
                     else:
                         set_system_state(db, "ai_target_goal", thought[:50]) # OLED用に少し短くして保存
@@ -535,12 +480,22 @@ async def handle_health_command(db: Session, reply_token: str):
     billing_alert = get_system_state(db, "billing_alert_level", "NORMAL")
     mode = get_system_state(db, "ship_mode", ShipMode.PORT.value)
 
+    # Ollamaの死活監視を追加
+    ollama_health = "OFFLINE"
+    try:
+        executor = await get_llm_executor()
+        if await executor.provider.health_check():
+            ollama_health = "ONLINE"
+    except:
+        pass
+
     ja_text = (f"【System Health】\n"
                f"CPU: {cpu}%\n"
                f"Mem: {mem}%\n"
                f"Temp: {temp_str}\n"
                f"SSD: {disk_ssd}\n"
                f"AI Status: {ai_status}\n"
+               f"Ollama: {ollama_health}\n"
                f"Billing: {billing_alert}\n"
                f"Mode: {mode}")
     en_text = ja_text # Almost same terms
@@ -617,16 +572,24 @@ async def handle_activity_report(db: Session, reply_token: str):
 【DNS 航海ログ】
 {dns_voyage_log}
 """
-        response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=400
+        # テンプレート化されたプロンプト管理構成経由でアクティビティレポートを生成
+        executor = await get_llm_executor()
+        
+        variables = {
+            "log_summary": log_summary_input,
+            "dns_log": dns_voyage_log
+        }
+        
+        # summary タスクを流用するか、とりあえず execute_text で汎用的に呼ぶ
+        # 既存の summary は JSON なので、ここでは簡易的に chat を使うか、プロンプトを直接渡す
+        # executor.execute_text("chat", variables=...) だと chat_user.txt が使われる
+        # 今回は暫定的にプロンプトを新設せずに、LLMExecutor.provider.generate_text を呼ぶか
+        # いや、せっかくなので manifest に activity_report を追加する
+        
+        report = await executor.execute_text(
+            task_type="activity_report",
+            variables=variables
         )
-        report = response.choices[0].message.content.strip()
-        await report_usage(response)
         await send_reply(reply_token, report)
     except Exception as e:
         logger.error(f"Activity report error: {e}")
@@ -858,8 +821,12 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
                     await send_reply(payload.reply_token, "課金上限に達したみたいばい。ごめんね。")
                     return
 
-            response = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+            # 抽象化レイヤー経由で呼び出し
+            llm = await get_llm_provider()
+            model = ModelRouter.get_model("chat")
+            
+            reply_text = await llm.generate_text(
+                model=model,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT + f"\n\n【脳内コンテキスト】\n{brain_context}"},
                     {"role": "user", "content": payload.text}
@@ -867,8 +834,6 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
                 max_tokens=400,
                 temperature=0.8
             )
-            reply_text = response.choices[0].message.content.strip()
-            await report_usage(response)
             await send_reply(payload.reply_token, reply_text)
             await record_working_memory(f"Conversation", f"Master: {payload.text}\nAYN: {reply_text}")
             set_system_state(db, "ai_target_goal", "待機中ばい")
