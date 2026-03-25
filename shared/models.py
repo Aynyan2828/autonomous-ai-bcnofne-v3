@@ -53,6 +53,7 @@ class DiaryEntry(Base):
     id = Column(Integer, primary_key=True, index=True)
     date_str = Column(String, index=True) # YYYY-MM-DD
     summary = Column(Text, nullable=False)
+    proposed_goals = Column(Text, nullable=True) # JSON list of strings
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class Memory(Base):

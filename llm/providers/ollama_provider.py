@@ -3,66 +3,87 @@ import os
 import json
 import httpx
 import logging
+import time
 from typing import List, Dict, Any, Optional
 from ..base import LLMProvider
+from ..config import LLMConfig
 
 logger = logging.getLogger("llm.providers.ollama")
 
 class OllamaProvider(LLMProvider):
-    def __init__(self, base_url: str = None):
-        self.base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
-        self.timeout = float(os.getenv("LLM_REQUEST_TIMEOUT", "60.0"))
+    provider_type: str = "ollama"
+
+    def __init__(self, base_url: Optional[str] = None):
+        cfg = LLMConfig.get_provider_config("ollama")
+        self.base_url = base_url or cfg.get("base_url", "http://ollama:11434")
+        self.default_timeout = cfg.get("timeout", 60.0)
+        self.max_retries = cfg.get("max_retries", 3)
+        self.backoff_factor = cfg.get("backoff_factor", 2.0)
 
     async def generate_text(self, model: str, messages: List[Dict[str, str]], **kwargs) -> str:
-        max_retries = int(os.getenv("LLM_MAX_RETRIES", "3"))
+        task_type = kwargs.get("task_type", "unknown")
+        task_cfg = LLMConfig.get_task_config(task_type)
+        timeout = kwargs.get("timeout") or task_cfg.get("timeout") or self.default_timeout
+        max_retries = kwargs.get("max_retries") or self.max_retries
+        
+        start_time = time.perf_counter()
         last_error: Optional[Exception] = None
         
-        task_type = kwargs.get("task_type", "unknown")
-        logger.info(f"Ollama request started: task={task_type}, model={model}, timeout={self.timeout}s")
+        logger.info(f"[Ollama] Request started: task={task_type}, model={model}, timeout={timeout}s")
         
         for attempt in range(max_retries):
+            attempt_start = time.perf_counter()
             try:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with httpx.AsyncClient(timeout=timeout) as client:
                     payload = {
                         "model": model,
                         "messages": messages,
                         "stream": False,
                         "options": {
                             "temperature": kwargs.get("temperature", 0.7),
-                            "num_predict": kwargs.get("max_tokens", 1024),
+                            "num_predict": kwargs.get("max_tokens", 2048),
                         },
                     }
                     response = await client.post(f"{self.base_url}/v1/chat/completions", json=payload)
                     response.raise_for_status()
                     data = response.json()
+                    
                     content = data["choices"][0]["message"]["content"].strip()
+                    latency_ms = int((time.perf_counter() - start_time) * 1000)
+                    
                     if content:
-                        logger.info(f"Ollama request success: task={task_type}, model={model}")
+                        logger.info(f"[Ollama] Request success: task={task_type}, model={model}, latency={latency_ms}ms, attempt={attempt+1}")
                         return content
                     raise ValueError("Empty response from Ollama")
+                    
             except Exception as e:
                 last_error = e
-                wait_time = (2 ** attempt)
+                latency_ms = int((time.perf_counter() - attempt_start) * 1000)
+                wait_time = self.backoff_factor ** attempt
+                
+                logger.warning(f"[Ollama] Attempt {attempt+1} failed ({latency_ms}ms): {e}")
+                
                 if attempt < max_retries - 1:
-                    logger.warn(f"Ollama attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s...")
+                    logger.info(f"[Ollama] Retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(f"Ollama all retries failed for task={task_type}: {e}")
+                    total_latency = int((time.perf_counter() - start_time) * 1000)
+                    logger.error(f"[Ollama] All retries failed for task={task_type} ({total_latency}ms): {e}")
         
         if last_error:
             raise last_error
-        raise Exception("Unknown error in generate_text")
+        raise Exception("Unknown error in Ollama generation")
 
     async def embed_text(self, model: str, text: str) -> List[float]:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            payload = {
-                "model": model,
-                "input": text
-            }
-            response = await client.post(f"{self.base_url}/v1/embeddings", json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data["data"][0]["embedding"]
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                payload = {"model": model, "input": text}
+                response = await client.post(f"{self.base_url}/v1/embeddings", json=payload)
+                response.raise_for_status()
+                return response.json()["data"][0]["embedding"]
+        except Exception as e:
+            logger.error(f"Ollama embedding failed: {e}")
+            raise
 
     async def health_check(self) -> bool:
         try:

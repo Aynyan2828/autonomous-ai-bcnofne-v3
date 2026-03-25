@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import time
 from typing import Any, Type, Dict, Optional
 
 from pydantic import BaseModel, ValidationError
@@ -9,13 +10,14 @@ from pydantic import BaseModel, ValidationError
 from llm.prompt_loader import PromptLoader
 from llm.json_repair import parse_or_none
 from llm.router import ModelRouter
+from llm.config import LLMConfig
 
 logger = logging.getLogger("llm.executor")
 
 class LLMExecutor:
     def __init__(self, provider: Any = None, repair_provider: Any | None = None) -> None:
         self.provider = provider
-        self.repair_provider = repair_provider or provider
+        self.repair_provider = repair_provider
         self.prompt_loader = PromptLoader()
         self._router_cache: Optional[ModelRouter] = None
 
@@ -25,34 +27,59 @@ class LLMExecutor:
             self._router_cache = await get_model_router()
         return self._router_cache
 
+    async def _get_provider(self, router: ModelRouter) -> Any:
+        """優先順位: 1.明示指定, 2.Router定義, 3.Configデフォルト"""
+        if self.provider:
+            return self.provider
+        
+        # Router からプロバイダ取得を試みる（既存実装互換）
+        try:
+            return await router.get_provider()
+        except:
+            # フォールバックとして Config から取得
+            from .factory import get_provider
+            default_p = LLMConfig.get_global("default_provider", "ollama")
+            return await get_provider(default_p)
+
     async def execute_text(self, task_type: str, variables: dict[str, Any]) -> str:
         prompts = self.prompt_loader.get_task_prompts(task_type, variables)
         router = await self._get_router()
         model = router.get_model(task_type)
-        
-        provider = self.provider or await router.get_provider()
+        provider = await self._get_provider(router)
         
         messages = [
             {"role": "system", "content": prompts["system"]},
             {"role": "user", "content": prompts["user"]}
         ]
         
-        return await provider.generate_text(
-            model=model,
-            messages=messages,
-            task_type=task_type
-        )
+        try:
+            return await provider.generate_text(
+                model=model,
+                messages=messages,
+                task_type=task_type
+            )
+        except Exception as e:
+            if LLMConfig.get_global("fallback_enabled", True) and provider.provider_type != "openai":
+                logger.warning(f"Task {task_type} failed on {provider.provider_type}. Falling back to OpenAI. Error: {e}")
+                from .factory import get_provider
+                fallback_provider = await get_provider("openai")
+                return await fallback_provider.generate_text(
+                    model="gpt-4o-mini", # 固定または設定から
+                    messages=messages,
+                    task_type=task_type
+                )
+            raise
 
     async def execute_json(
         self,
         task_type: str,
         variables: dict[str, Any],
-        schema: Type[BaseModel],
-    ) -> BaseModel:
+        schema: Type[BaseModel] = None, # スキーマなし（Dict）も許容
+    ) -> Any:
         prompts = self.prompt_loader.get_task_prompts(task_type, variables)
         router = await self._get_router()
         model = router.get_model(task_type)
-        provider = self.provider or await router.get_provider()
+        provider = await self._get_provider(router)
         
         # 7B向けにJSON出力のヒントを強化
         user_prompt = prompts["user"]
@@ -64,45 +91,66 @@ class LLMExecutor:
             {"role": "user", "content": user_prompt}
         ]
 
-        raw = await provider.generate_text(
-            model=model,
-            messages=messages,
-            task_type=task_type
-        )
+        raw = ""
+        try:
+            raw = await provider.generate_text(
+                model=model,
+                messages=messages,
+                task_type=task_type
+            )
+        except Exception as e:
+            if LLMConfig.get_global("fallback_enabled", True) and provider.provider_type != "openai":
+                logger.warning(f"JSON Task {task_type} failed on {provider.provider_type}. Falling back to OpenAI.")
+                from .factory import get_provider
+                fallback_provider = await get_provider("openai")
+                raw = await fallback_provider.generate_text(
+                    model="gpt-4o-mini",
+                    messages=messages,
+                    task_type=task_type
+                )
+            else:
+                raise
 
         parsed = parse_or_none(raw)
         if parsed is not None:
-            try:
-                return schema.model_validate(parsed)
-            except ValidationError as e:
-                logger.warning(f"Validation error for {task_type}: {e}. Attempting repair.")
+            if schema:
+                try:
+                    return schema.model_validate(parsed)
+                except ValidationError as e:
+                    logger.warning(f"Validation error for {task_type}: {e}. Attempting repair.")
+            else:
+                return parsed
 
         # Repair プロンプトによる修復
-        repair_variables = {"input_text": raw}
-        repair_prompts = self.prompt_loader.get_task_prompts("repair", repair_variables)
-        repair_model = router.get_model("repair")
-        
-        repair_messages = [
-            {"role": "system", "content": repair_prompts["system"]},
-            {"role": "user", "content": repair_prompts["user"]}
-        ]
+        repair_provider = self.repair_provider or provider
+        if raw:
+            repair_variables = {"input_text": raw}
+            repair_prompts = self.prompt_loader.get_task_prompts("repair", repair_variables)
+            repair_model = router.get_model("repair")
+            
+            repair_messages = [
+                {"role": "system", "content": repair_prompts["system"]},
+                {"role": "user", "content": repair_prompts["user"]}
+            ]
 
-        repaired_raw = await self.repair_provider.generate_text(
-            model=repair_model,
-            messages=repair_messages,
-            task_type="repair"
-        )
+            repaired_raw = await repair_provider.generate_text(
+                model=repair_model,
+                messages=repair_messages,
+                task_type="repair"
+            )
 
-        repaired_parsed = parse_or_none(repaired_raw)
-        if repaired_parsed is None:
-            logger.error(f"JSON repair failed for {task_type}. raw={raw!r}")
-            raise ValueError(f"JSON repair failed. task={task_type}")
+            repaired_parsed = parse_or_none(repaired_raw)
+            if repaired_parsed is not None:
+                if schema:
+                    try:
+                        return schema.model_validate(repaired_parsed)
+                    except ValidationError as e:
+                        logger.error(f"Schema validation failed after repair: {e}")
+                        raise e
+                return repaired_parsed
 
-        try:
-            return schema.model_validate(repaired_parsed)
-        except ValidationError as e:
-            logger.error(f"Schema validation failed after repair: {e}")
-            raise e
+        logger.error(f"JSON repair failed for {task_type}. raw={raw!r}")
+        raise ValueError(f"JSON repair failed. task={task_type}")
 
     async def execute_summarization(
         self,

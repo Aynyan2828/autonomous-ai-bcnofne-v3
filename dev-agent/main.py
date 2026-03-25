@@ -8,12 +8,31 @@ import json
 import uuid
 import traceback
 import difflib
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends
 from pydantic import BaseModel
 from llm import get_llm_executor
+try:
+    from .safety import SafetyGuard
+except (ImportError, ValueError):
+    # Fallback for script execution
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from safety import SafetyGuard
+    except ImportError:
+        # Final fallback: manual load if needed (unlikely to reach here)
+        class SafetyGuard:
+            @staticmethod
+            def check_git_status(): return True, "Internal fallback"
+            @staticmethod
+            def is_command_safe(cmd): return True, "Internal fallback"
+            @staticmethod
+            def validate_modification(p, c): return True, "Internal fallback"
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__))) # Current dir for safety.py
+
 from shared import init_db
 from shared.logger import ShipLogger
 from shared.database import SessionLocal
@@ -21,6 +40,7 @@ from shared.models import SystemState, SystemLog, AutoImprovementProposal, Evolu
 from shared.bilingual_formatter import format_bilingual
 from shared.public_exporter import export_to_public_markdown
 from sqlalchemy import func
+from safety import SafetyGuard
 
 VERSION = "v3.3.0"
 print(f"AYN {VERSION} STARTING... (CWD: {os.getcwd()})")
@@ -89,7 +109,7 @@ async def send_push_notification(text: str):
         except Exception as e:
             logger.error(f"Failed to send push notification: {e}")
 
-def record_evolution_log(version: str, event_type: str, desc_ja: str, desc_en: str, files_changed: str = None):
+def record_evolution_log(version: str, event_type: str, desc_ja: str, desc_en: str, files_changed: Optional[str] = None):
     """重大なシステム変更を進化録（Evolution Log）に記録する"""
     db = SessionLocal()
     try:
@@ -388,6 +408,14 @@ async def apply_proposal(proposal_id: str, background_tasks: BackgroundTasks, _:
 async def execute_apply(proposal_id: str):
     """本番環境への反映（Apply）を実行"""
     logger.info(f"Starting Apply for proposal: {proposal_id}")
+    
+    # --- Safety Check ---
+    is_safe, reason = SafetyGuard.check_git_status()
+    if not is_safe:
+        logger.error(f"Dev-Agent safety block: {reason}")
+        # スキップして終了 (本来はマスターに通知が必要)
+        return
+
     set_system_state_helper("ai_target_goal", f"{proposal_id}ば適用するけん！")
     
     try:
@@ -727,7 +755,8 @@ async def process_suggestion(suggestion):
                 last_error_summary = f"File {f}: {file_error.splitlines()[0]}"
             else:
                 current_attempt_files_report[f] = "PASSED"
-                if f in errors_feedback_dict: del errors_feedback_dict[f] 
+                if f in errors_feedback_dict:
+                    errors_feedback_dict.pop(f, None)
             
             attempt_log["results"][f] = {"status": current_attempt_files_report[f], "error": file_error}
 
@@ -746,8 +775,8 @@ async def process_suggestion(suggestion):
                 with open(work_path, "r") as f_in:
                     new_lines = f_in.readlines()
                 
-                diff = difflib.unified_diff(old_lines, new_lines, fromfile=f"a/{f}", tofile=f"b/{f}")
-                full_diff += "".join(diff) + "\n"
+                diff_lines = list(difflib.unified_diff(old_lines, new_lines, fromfile=f"a/{f}", tofile=f"b/{f}"))
+                full_diff += "".join(diff_lines) + "\n"
             break
 
     # 4. 提案の保存

@@ -36,6 +36,14 @@ def migrate_db(target_engine):
                 conn.commit()
                 print(f"[INIT] Added {len(missing_columns)} missing columns to 'improvement_proposals' table.")
 
+    if "diary_entries" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("diary_entries")]
+        if "proposed_goals" not in columns:
+            with target_engine.connect() as conn:
+                conn.execute(text("ALTER TABLE diary_entries ADD COLUMN proposed_goals TEXT"))
+                conn.commit()
+                print(f"[INIT] Added missing column 'proposed_goals' to 'diary_entries' table.")
+
 # 初期化用関数 (core などから起動時に呼び出す)
 def init_db():
     # 1. 基礎構成の作成

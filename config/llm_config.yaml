@@ -1,0 +1,29 @@
+# LLM Runtime Configuration
+default_provider: ollama
+fallback_enabled: true
+
+providers:
+  ollama:
+    base_url: "http://ollama:11434"
+    timeout: 60.0
+    max_retries: 3
+    backoff_factor: 2.0
+  openai:
+    base_url: "https://api.openai.com/v1"
+    timeout: 30.0
+    max_retries: 2
+    backoff_factor: 1.5
+
+tasks:
+  code:
+    model: "qwen2.5:7b"
+    timeout: 90.0
+  observation:
+    model: "qwen2.5:7b"
+    timeout: 60.0
+  diary:
+    model: "qwen2.5:7b"
+    timeout: 120.0
+  default:
+    model: "qwen2.5:7b"
+    timeout: 60.0

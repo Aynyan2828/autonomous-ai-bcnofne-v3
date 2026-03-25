@@ -1,60 +1,54 @@
 import os
-import json
 import httpx
 import logging
-from typing import List, Dict, Any
-from openai import AsyncOpenAI
+from typing import List, Dict, Any, Optional
 from ..base import LLMProvider
+from ..config import LLMConfig
 
 logger = logging.getLogger("llm.providers.openai")
 
 class OpenAIProvider(LLMProvider):
-    def __init__(self, api_key: str = None):
-        api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.client = AsyncOpenAI(api_key=api_key)
+    provider_type: str = "openai"
+
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+        cfg = LLMConfig.get_provider_config("openai")
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.base_url = base_url or cfg.get("base_url", "https://api.openai.com/v1")
+        self.timeout = cfg.get("timeout", 30.0)
 
     async def generate_text(self, model: str, messages: List[Dict[str, str]], **kwargs) -> str:
-        response = await self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            **kwargs
-        )
-        await self._report_billing(response, model)
-        return response.choices[0].message.content.strip()
+        if not self.api_key:
+            raise ValueError("OpenAI API Key is not set.")
 
-    async def generate_json(self, model: str, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
-        response = await self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            response_format={"type": "json_object"},
-            **kwargs
-        )
-        await self._report_billing(response, model)
-        return json.loads(response.choices[0].message.content)
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", 0.7),
+            "max_tokens": kwargs.get("max_tokens", 2048)
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"].strip()
+            if content:
+                return content
+            raise ValueError("Empty response from OpenAI")
 
     async def embed_text(self, model: str, text: str) -> List[float]:
-        response = await self.client.embeddings.create(
-            input=text,
-            model=model
-        )
-        return response.data[0].embedding
+        if not self.api_key:
+            raise ValueError("OpenAI API Key is not set.")
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        payload = {"model": model, "input": text}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(f"{self.base_url}/embeddings", headers=headers, json=payload)
+            response.raise_for_status()
+            return response.json()["data"][0]["embedding"]
 
     async def health_check(self) -> bool:
-        try:
-            await self.client.models.list()
-            return True
-        except:
-            return False
-
-    async def _report_billing(self, response, model: str):
-        """billing-guard に使用量を報告する"""
-        try:
-            usage = getattr(response, "usage", None)
-            input_tokens = usage.prompt_tokens if usage else 0
-            output_tokens = usage.completion_tokens if usage else 0
-            async with httpx.AsyncClient() as client:
-                await client.post("http://billing-guard:8002/record",
-                                 params={"model": model, "input_tokens": input_tokens, "output_tokens": output_tokens},
-                                 timeout=2.0)
-        except:
-            pass
+        return bool(self.api_key)

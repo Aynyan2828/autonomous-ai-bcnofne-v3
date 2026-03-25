@@ -2,6 +2,8 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional
 
 class LLMProvider:
+    provider_type: str = "base"
+
     async def generate_text(self, model: str, messages: List[Dict[str, str]], **kwargs) -> str:
         raise NotImplementedError
 

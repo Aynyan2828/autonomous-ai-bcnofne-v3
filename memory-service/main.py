@@ -81,8 +81,25 @@ def health_check():
     return {"status": "ok", "service": "memory-service"}
 
 @app.post("/memories/", response_model=MemoryResponse)
-def create_memory(memory: MemoryCreate, db: Session = Depends(get_db), ldb: Session = Depends(get_longterm_db)):
+async def create_memory(memory: MemoryCreate, db: Session = Depends(get_db), ldb: Session = Depends(get_longterm_db)):
     """記憶を作成。多層メモリ対応。"""
+    
+    # 0. AI による重要度とレイヤーの再分類 (Optional)
+    # 明示的に指定されていない場合や、自動分類が有効な場合に実施
+    if memory.layer == MemoryLayer.EPISODIC.value and memory.importance == 1:
+        try:
+            executor = await get_llm_executor()
+            res = await executor.execute_json(
+                task_type="classification",
+                variables={"input_text": f"Topic: {memory.topic}\nContent: {memory.content}"}
+            )
+            # ClassificationResult { primary_label, confident, reason }
+            memory.layer = res.get("primary_label", memory.layer)
+            # 信頼度に基づき重要度を調整 (簡易実装)
+            memory.importance = int(res.get("confidence", 0.5) * 5) or 1
+        except Exception as e:
+            logger.warn(f"Failed to auto-classify memory: {e}")
+
     db_memory = Memory(
         topic=memory.topic,
         content=memory.content,
@@ -96,7 +113,7 @@ def create_memory(memory: MemoryCreate, db: Session = Depends(get_db), ldb: Sess
     db.refresh(db_memory)
     
     # 2. 重要度が高い、または特定の層は HDD (長期記憶) にも保存
-    if memory.importance >= 4 or memory.layer in [MemoryLayer.REFLECTIVE.value, MemoryLayer.SEMANTIC.value]:
+    if memory.importance >= 4 or memory.layer in [MemoryLayer.REFLECTIVE.value, MemoryLayer.SEMANTIC.value, MemoryLayer.RELATIONAL.value]:
         try:
             long_memory = Memory(
                 topic=memory.topic,
@@ -112,8 +129,29 @@ def create_memory(memory: MemoryCreate, db: Session = Depends(get_db), ldb: Sess
 
     return db_memory
 
+@app.get("/memories/recall", response_model=List[MemoryResponse])
+async def recall_memories(query: str, limit: int = 5, db: Session = Depends(get_db), ldb: Session = Depends(get_longterm_db)):
+    """
+    クエリに関連する記憶を想起する。
+    1. SSD から直近の関連メモリを検索
+    2. HDD から重要度の高い関連メモリを検索 (将来的にセマンティック検索へ拡張)
+    """
+    # 簡易実装: キーワードマッチング
+    ssd_mems = db.query(Memory).filter(
+        (Memory.topic.contains(query)) | (Memory.content.contains(query))
+    ).order_by(Memory.importance.desc(), Memory.created_at.desc()).limit(limit).all()
+    
+    if len(ssd_mems) < limit:
+        hdd_limit = limit - len(ssd_mems)
+        hdd_mems = ldb.query(Memory).filter(
+            (Memory.topic.contains(query)) | (Memory.content.contains(query))
+        ).order_by(Memory.importance.desc(), Memory.created_at.desc()).limit(hdd_limit).all()
+        ssd_mems.extend(hdd_mems)
+    
+    return ssd_mems
+
 @app.get("/memories/", response_model=List[MemoryResponse])
-def get_memories(topic: str = None, layer: str = None, limit: int = 10, db: Session = Depends(get_db)):
+def get_memories(topic: Optional[str] = None, layer: Optional[str] = None, limit: int = 10, db: Session = Depends(get_db)):
     """SSD (短期記憶) から取得"""
     query = db.query(Memory)
     if topic:
@@ -123,7 +161,7 @@ def get_memories(topic: str = None, layer: str = None, limit: int = 10, db: Sess
     return query.order_by(Memory.created_at.desc()).limit(limit).all()
 
 @app.get("/longterm-memories/", response_model=List[MemoryResponse])
-def get_longterm_memories(topic: str = None, layer: str = None, limit: int = 20, ldb: Session = Depends(get_longterm_db)):
+def get_longterm_memories(topic: Optional[str] = None, layer: Optional[str] = None, limit: int = 20, ldb: Session = Depends(get_longterm_db)):
     """HDD (長期記憶) から取得"""
     query = ldb.query(Memory)
     if topic:
@@ -138,17 +176,25 @@ def get_memory_summary(db: Session = Depends(get_db)):
     try:
         logger.info("Memory summary requested via /summary")
         # 特定の層を優先して取得
-        priority_layers = [MemoryLayer.MISSION.value, MemoryLayer.REFLECTIVE.value, MemoryLayer.SEMANTIC.value]
-        memories = db.query(Memory).filter(Memory.layer.in_(priority_layers)).order_by(Memory.importance.desc(), Memory.created_at.desc()).limit(5).all()
+        priority_layers = [MemoryLayer.MISSION.value, MemoryLayer.REFLECTIVE.value, MemoryLayer.SEMANTIC.value, MemoryLayer.RELATIONAL.value]
+        memories = db.query(Memory).filter(Memory.layer.in_(priority_layers)).order_by(Memory.importance.desc(), Memory.created_at.desc()).limit(10).all()
         
         # 通常の記憶も追加
-        recent_memories = db.query(Memory).filter(Memory.layer.in_([MemoryLayer.EPISODIC.value, MemoryLayer.WORKING.value])).order_by(Memory.created_at.desc()).limit(10).all()
+        recent_memories = db.query(Memory).filter(Memory.layer.in_([MemoryLayer.EPISODIC.value, MemoryLayer.WORKING.value])).order_by(Memory.created_at.desc()).limit(15).all()
         memories.extend(recent_memories)
 
         if not memories:
             return {"summary": "特に記憶していることはなかよ。"}
         
-        summary_text = "現在の脳内コンテキストばい:\n" + "\n".join([f"- [{m.layer}/{m.topic}] {m.content}" for m in memories])
+        # 重複排除 (IDで一意にする)
+        seen_ids = set()
+        unique_mems = []
+        for m in memories:
+            if m.id not in seen_ids:
+                unique_mems.append(m)
+                seen_ids.add(m.id)
+
+        summary_text = "現在の脳内コンテキストばい:\n" + "\n".join([f"- [{m.layer}/{m.topic}] {m.content}" for m in unique_mems])
         return {"summary": summary_text}
     except Exception as e:
         import traceback
@@ -206,8 +252,7 @@ async def reflect_memories(db: Session = Depends(get_db)):
         )
         db.add(new_memory)
         
-        # 処理済みの古い WORKING メモリなどは削除または優先度を下げる（ここでは何もしないか、削除する）
-        # 簡単のため WORKING メモリだけ削除
+        # 処理済みの古い WORKING メモリなどは削除
         db.query(Memory).filter(Memory.layer == MemoryLayer.WORKING.value, Memory.created_at >= one_day_ago).delete()
         
         db.commit()
@@ -240,7 +285,7 @@ def create_proposal(proposal: ProposalCreate, db: Session = Depends(get_db)):
     return db_proposal
 
 @app.get("/proposals/", response_model=List[ProposalResponse])
-def get_proposals(status: str = None, limit: int = 10, db: Session = Depends(get_db)):
+def get_proposals(status: Optional[str] = None, limit: int = 10, db: Session = Depends(get_db)):
     """提案一覧を取得"""
     query = db.query(AutoImprovementProposal)
     if status:
