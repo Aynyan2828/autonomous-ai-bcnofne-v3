@@ -743,6 +743,9 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
     elif text == "autonomous off" or text == "port":
         await handle_state_change(db, payload.reply_token, "ship_mode", ShipMode.PORT.value, "PORTモードに戻ったよ。")
         return
+    elif text == "再開" or text == "resume" or text == "start":
+        await handle_state_change(db, payload.reply_token, "ai_status", "RUNNING", "了解ばい！AYN、再始動するけん。またよろしくね、マスター！")
+        return
     elif text == "self" or text == "/self" or text == "セルフ":
         await handle_self_command(db, payload.reply_token)
         return
@@ -821,24 +824,24 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
                     await send_reply(payload.reply_token, "課金上限に達したみたいばい。ごめんね。")
                     return
 
-            # 抽象化レイヤー経由で呼び出し
-            llm = await get_llm_provider()
-            model = ModelRouter.get_model("chat")
+            # LLMExecutor を使用して応答を生成
+            executor = await get_llm_executor()
             
-            reply_text = await llm.generate_text(
-                model=model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT + f"\n\n【脳内コンテキスト】\n{brain_context}"},
-                    {"role": "user", "content": payload.text}
-                ],
-                max_tokens=400,
-                temperature=0.8
+            variables = {
+                "input_text": payload.text,
+                "brain_context": brain_context
+            }
+            
+            reply_text = await executor.execute_text(
+                task_type="chat",
+                variables=variables
             )
+            
             await send_reply(payload.reply_token, reply_text)
             await record_working_memory(f"Conversation", f"Master: {payload.text}\nAYN: {reply_text}")
             set_system_state(db, "ai_target_goal", "待機中ばい")
         except Exception as e:
-            logger.error(f"OpenAI error: {e}")
+            logger.error(f"LLM error: {e}")
             await send_reply(payload.reply_token, f"頭がボーッとしてうまく考えられんと... (エラー: {e})")
 
     background_tasks.add_task(process_ai_reply)
