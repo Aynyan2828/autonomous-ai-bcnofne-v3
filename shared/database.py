@@ -26,12 +26,12 @@ SQLALCHEMY_LONGTERM_DATABASE_URL = f"sqlite:///{HDD_DB_PATH}"
 
 # エンジンとセッションの作成
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False, "timeout": 30.0}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 longterm_engine = create_engine(
-    SQLALCHEMY_LONGTERM_DATABASE_URL, connect_args={"check_same_thread": False}
+    SQLALCHEMY_LONGTERM_DATABASE_URL, connect_args={"check_same_thread": False, "timeout": 30.0}
 )
 LongtermSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=longterm_engine)
 

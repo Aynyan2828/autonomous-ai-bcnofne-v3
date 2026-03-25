@@ -511,24 +511,28 @@ def update_oled(db: Session):
 async def hardware_loop():
     setup_hardware()
     
-    db = SessionLocal()
-    try:
-        while True:
+    while True:
+        try:
             temp = get_cpu_temp()
             load = psutil.cpu_percent()
+            
+            # ファン制御はDB不要
             control_fan(temp, load)
-            update_oled(db)
-            db.expire_all()
-            await asyncio.sleep(0.1)
-    except Exception as e:
-        logger.error(f"Hardware loop error: {e}")
-    finally:
-        db.close()
-        if HARDWARE_AVAILABLE:
-            if fan_ctrl:
-                fan_ctrl.stop()
-            if pi:
-                pi.stop()
+            
+            # OLED更新はDB必要（短寿命セッション）
+            db = SessionLocal()
+            try:
+                update_oled(db)
+            finally:
+                db.close()
+                
+            await asyncio.sleep(0.5) # 0.5秒に緩和してDB負荷を軽減
+        except Exception as e:
+            logger.error(f"Hardware loop error: {e}")
+            if "database is locked" in str(e):
+                await asyncio.sleep(1.0) # ロック時は長めに待つ
+            else:
+                await asyncio.sleep(0.5)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
