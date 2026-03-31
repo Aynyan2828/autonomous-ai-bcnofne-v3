@@ -44,11 +44,11 @@ class OllamaProvider(LLMProvider):
                             "num_predict": kwargs.get("max_tokens", 2048),
                         },
                     }
-                    response = await client.post(f"{self.base_url}/v1/chat/completions", json=payload)
+                    response = await client.post(f"{self.base_url}/api/chat", json=payload)
                     response.raise_for_status()
                     data = response.json()
                     
-                    content = data["choices"][0]["message"]["content"].strip()
+                    content = data["message"]["content"].strip()
                     latency_ms = int((time.perf_counter() - start_time) * 1000)
                     
                     if content:
