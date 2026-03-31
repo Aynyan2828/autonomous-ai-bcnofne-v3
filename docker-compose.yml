@@ -26,29 +26,8 @@ services:
       - "8000:8000"
     depends_on:
       - billing-guard
-      - ollama
-
-  ollama:
-    image: ollama/ollama:latest
-    container_name: shipos-ollama
-    restart: unless-stopped
-    volumes:
-      - ./data/ollama:/root/.ollama
-    environment:
-      - TZ=Asia/Tokyo
-      - OLLAMA_HOST=0.0.0.0
-    # GPUを使う場合は以下のコメントアウトを外す（NVIDIA Container Toolkitが必要）
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
-    networks:
-      - shipos-net
-    ports:
-      - "11434:11434"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   line-gateway:
     <<: *common
@@ -87,6 +66,8 @@ services:
     container_name: shipos-diary-service
     ports:
       - "8004:8004"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   watchdog:
     <<: *common
@@ -136,6 +117,8 @@ services:
     container_name: shipos-browser-agent
     ports:
       - "8009:8009"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   gui:
     <<: *common
@@ -145,6 +128,9 @@ services:
     container_name: shipos-gui
     ports:
       - "8010:8010"
+
+  ollama:
+    # 削除 (ラズパイホストで直接動かすため)
 
   oled-controller:
     restart: unless-stopped

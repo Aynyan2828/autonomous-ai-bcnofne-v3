@@ -16,14 +16,14 @@ providers:
 
 tasks:
   code:
-    model: "qwen2.5:7b"
+    model: "qwen2.5:3b"
     timeout: 90.0
   observation:
-    model: "qwen2.5:7b"
+    model: "qwen2.5:3b"
     timeout: 60.0
   diary:
-    model: "qwen2.5:7b"
+    model: "qwen2.5:3b"
     timeout: 120.0
   default:
-    model: "qwen2.5:7b"
+    model: "qwen2.5:3b"
     timeout: 60.0
