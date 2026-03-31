@@ -27,7 +27,7 @@ services:
     depends_on:
       - billing-guard
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "ollama:host-gateway"
 
   line-gateway:
     <<: *common
@@ -67,7 +67,7 @@ services:
     ports:
       - "8004:8004"
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "ollama:host-gateway"
 
   watchdog:
     <<: *common
@@ -118,7 +118,7 @@ services:
     ports:
       - "8009:8009"
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "ollama:host-gateway"
 
   gui:
     <<: *common
@@ -128,9 +128,6 @@ services:
     container_name: shipos-gui
     ports:
       - "8010:8010"
-
-  ollama:
-    # 削除 (ラズパイホストで直接動かすため)
 
   oled-controller:
     restart: unless-stopped
