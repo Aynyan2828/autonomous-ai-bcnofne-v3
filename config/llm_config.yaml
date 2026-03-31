@@ -5,25 +5,25 @@ fallback_enabled: true
 providers:
   ollama:
     base_url: "http://ollama:11434"
-    timeout: 60.0
+    timeout: 7200.0
     max_retries: 3
     backoff_factor: 2.0
   openai:
     base_url: "https://api.openai.com/v1"
-    timeout: 30.0
+    timeout: 300.0
     max_retries: 2
     backoff_factor: 1.5
 
 tasks:
   code:
     model: "qwen2.5:3b"
-    timeout: 90.0
+    timeout: 7200.0
   observation:
     model: "qwen2.5:3b"
-    timeout: 60.0
+    timeout: 7200.0
   diary:
     model: "qwen2.5:3b"
-    timeout: 120.0
+    timeout: 7200.0
   default:
     model: "qwen2.5:3b"
-    timeout: 60.0
+    timeout: 7200.0

@@ -16,7 +16,7 @@ class OllamaProvider(LLMProvider):
     def __init__(self, base_url: Optional[str] = None):
         cfg = LLMConfig.get_provider_config("ollama")
         self.base_url = base_url or cfg.get("base_url", "http://ollama:11434")
-        self.default_timeout = cfg.get("timeout", 60.0)
+        self.default_timeout = cfg.get("timeout", 7200.0)
         self.max_retries = cfg.get("max_retries", 3)
         self.backoff_factor = cfg.get("backoff_factor", 2.0)
 
@@ -76,7 +76,7 @@ class OllamaProvider(LLMProvider):
 
     async def embed_text(self, model: str, text: str) -> List[float]:
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 payload = {"model": model, "input": text}
                 response = await client.post(f"{self.base_url}/v1/embeddings", json=payload)
                 response.raise_for_status()
