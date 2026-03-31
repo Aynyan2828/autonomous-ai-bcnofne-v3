@@ -25,8 +25,8 @@ def get_ai_mode_status() -> Dict[str, Any]:
         openai_model = LLMConfig.get_provider_config("openai").get("model", "gpt-4o-mini")
         
         # キャッシュされた死活情報 (もしあれば)
-        local_ai_available = _get_state(db, "local_ai_available", "unknown") == "true"
-        openai_available = _get_state(db, "openai_available", "unknown") == "true"
+        local_ai_available = _get_state(db, "local_ai_available", "true") == "true"
+        openai_available = _get_state(db, "openai_available", "true") == "true"
         
         # 最終切替情報
         last_switch_at_raw = _get_state(db, "last_ai_mode_switch_at", None)

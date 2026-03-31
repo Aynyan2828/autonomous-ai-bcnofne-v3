@@ -11,6 +11,7 @@ from llm.prompt_loader import PromptLoader
 from llm.json_repair import parse_or_none
 from llm.router import ModelRouter
 from llm.config import LLMConfig
+from shared.database import SessionLocal
 
 logger = logging.getLogger("llm.executor")
 
