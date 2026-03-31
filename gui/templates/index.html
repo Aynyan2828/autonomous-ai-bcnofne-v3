@@ -32,6 +32,14 @@
     <!-- Main Content -->
     <div id="main-content">
         <h1>⚓ shipOS — AYN</h1>
+
+        <!-- AI Mode Badge -->
+        <div class="ai-badge-container">
+            <div class="ai-badge {% if ai_mode.fallback_active %}fallback{% elif ai_mode.active_mode == 'openai' %}openai{% else %}local{% endif %}">
+                <span class="pulse-dot"></span>
+                <span class="ai-mode-text">AI MODE: {{ ai_mode.display_label_ja }}</span>
+            </div>
+        </div>
         
         <!-- システム状態 -->
         <div class="card">

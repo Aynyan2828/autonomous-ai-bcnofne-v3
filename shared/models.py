@@ -172,3 +172,13 @@ class EvolutionLog(Base):
     description_en = Column(Text, nullable=False)
     files_changed = Column(Text, nullable=True) # CSV or JSON list
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class AIModeLog(Base):
+    """AIエンジンのモード切替ログ (Local AI <=> OpenAI)"""
+    __tablename__ = "ai_mode_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    from_mode = Column(String, index=True)
+    to_mode = Column(String, index=True)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

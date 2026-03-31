@@ -53,14 +53,27 @@ class LLMExecutor:
         ]
         
         try:
-            return await provider.generate_text(
+            res = await provider.generate_text(
                 model=model,
                 messages=messages,
                 task_type=task_type
             )
+            # 成功したら、もしフォールバック中やった場合はモードを元に戻す（再試行ベース）
+            from llm.status import record_mode_switch, _get_state
+            db = SessionLocal()
+            current_active = _get_state(db, "active_ai_mode", provider.provider_type)
+            if current_active == "openai" and provider.provider_type != "openai":
+                 record_mode_switch(db, "openai", provider.provider_type, f"Recovered from {task_type}")
+            db.close()
+            return res
         except Exception as e:
             if LLMConfig.get_global("fallback_enabled", True) and provider.provider_type != "openai":
                 logger.warning(f"Task {task_type} failed on {provider.provider_type}. Falling back to OpenAI. Error: {e}")
+                from llm.status import record_mode_switch
+                db = SessionLocal()
+                record_mode_switch(db, provider.provider_type, "openai", f"Fallback due to {task_type} error: {str(e)[:100]}")
+                db.close()
+
                 from .factory import get_provider
                 fallback_provider = await get_provider("openai")
                 return await fallback_provider.generate_text(
@@ -90,7 +103,8 @@ class LLMExecutor:
             {"role": "system", "content": prompts["system"]},
             {"role": "user", "content": user_prompt}
         ]
-
+ 
+        from llm.status import record_mode_switch, _get_state
         raw = ""
         try:
             raw = await provider.generate_text(
@@ -98,9 +112,19 @@ class LLMExecutor:
                 messages=messages,
                 task_type=task_type
             )
+            # 成功時の復帰チェック
+            db = SessionLocal()
+            current_active = _get_state(db, "active_ai_mode", provider.provider_type)
+            if current_active == "openai" and provider.provider_type != "openai":
+                 record_mode_switch(db, "openai", provider.provider_type, f"Recovered from JSON task {task_type}")
+            db.close()
         except Exception as e:
             if LLMConfig.get_global("fallback_enabled", True) and provider.provider_type != "openai":
                 logger.warning(f"JSON Task {task_type} failed on {provider.provider_type}. Falling back to OpenAI.")
+                db = SessionLocal()
+                record_mode_switch(db, provider.provider_type, "openai", f"Fallback due to JSON {task_type} error: {str(e)[:100]}")
+                db.close()
+
                 from .factory import get_provider
                 fallback_provider = await get_provider("openai")
                 raw = await fallback_provider.generate_text(

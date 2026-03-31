@@ -501,6 +501,30 @@ async def handle_health_command(db: Session, reply_token: str):
     en_text = ja_text # Almost same terms
     await send_reply(reply_token, format_bilingual(ja_text, en_text))
 
+async def handle_ai_mode_command(db: Session, reply_token: str):
+    from llm.status import get_ai_mode_status
+    status = get_ai_mode_status()
+    
+    ja_text = (f"【AI稼働モード状況】\n"
+               f"設定: {status['configured_mode']}\n"
+               f"現在: {status['active_mode']}\n"
+               f"状態: {status['display_label_ja']}\n"
+               f"Local機動: {'✅' if status['local_ai_available'] else '❌'}\n"
+               f"OpenAI機動: {'✅' if status['openai_available'] else '❌'}\n"
+               f"最終切替: {status['last_mode_switch_at'] or 'なし'}\n"
+               f"理由: {status['last_mode_switch_reason']}")
+    
+    en_text = (f"[AI Operational Mode]\n"
+               f"Config: {status['configured_mode']}\n"
+               f"Active: {status['active_mode']}\n"
+               f"Status: {status['display_label_en']}\n"
+               f"Local AI: {'Ready' if status['local_ai_available'] else 'Not Ready'}\n"
+               f"OpenAI: {'Ready' if status['openai_available'] else 'Not Ready'}\n"
+               f"Last Switch: {status['last_mode_switch_at'] or 'None'}\n"
+               f"Reason: {status['last_mode_switch_reason']}")
+
+    await send_reply(reply_token, format_bilingual(ja_text, en_text))
+
 async def handle_status_command(db: Session, reply_token: str):
     states = db.query(SystemState).all()
     lines = [f"{s.key}: {s.value}" for s in states]
@@ -769,6 +793,9 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
     elif text == "status":
         await handle_status_command(db, payload.reply_token)
         return
+    elif text in ["mode", "ai mode", "モード"]:
+        await handle_ai_mode_command(db, payload.reply_token)
+        return
     elif text == "航海日誌":
         await handle_diary_command(payload.reply_token)
         return
@@ -849,4 +876,16 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "core"}
+    from llm.status import get_ai_mode_status
+    ai_status = get_ai_mode_status()
+    return {
+        "status": "ok", 
+        "service": "core", 
+        "version": SYSTEM_VERSION,
+        "ai_status": ai_status
+    }
+
+@app.get("/api/v1/ai/mode")
+def get_ai_mode_api():
+    from llm.status import get_ai_mode_status
+    return get_ai_mode_status()

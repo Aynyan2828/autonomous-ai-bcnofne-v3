@@ -80,6 +80,20 @@ async def read_dashboard(request: Request):
         except Exception as e:
             print(f"Billing access error: {e}")
 
+        # AIモード情報の取得
+        ai_mode = {
+            "display_label_ja": "取得失敗",
+            "active_mode": "unknown",
+            "fallback_active": False
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get("http://core:8000/api/v1/ai/mode", timeout=2.0)
+                if resp.status_code == 200:
+                    ai_mode = resp.json()
+        except Exception as e:
+            print(f"AI mode access error: {e}")
+
         return templates.TemplateResponse(
             request=request,
             name="index.html",
@@ -87,7 +101,8 @@ async def read_dashboard(request: Request):
                 "system_states": system_states,
                 "billing_data": billing_data,
                 "logs": logs,
-                "proposals": proposals
+                "proposals": proposals,
+                "ai_mode": ai_mode
             }
         )
     except Exception as e:
