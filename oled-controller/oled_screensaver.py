@@ -10,8 +10,8 @@ class BCNOFNeScreenSaver:
         self.frame_count = 0
         
         # 定数
-        self.LOGO_X = 24
-        self.LOGO_Y = 16
+        self.MOON_X = 24
+        self.MOON_Y = 18
         
         # 波の状態
         self.wave_phase = 0
@@ -93,19 +93,14 @@ class BCNOFNeScreenSaver:
                     "life": random.randint(6, 12)
                 })
 
-    def _draw_crescent_logo(self, draw, x, y, ox, oy):
-        """はっきりとした美しい三日月ロゴの描画"""
-        # 三日月の外側 (細めのライン)
-        draw.arc([x-14+ox, y-14+oy, x+14+ox, y+14+oy], 40, 320, fill=255, width=1)
-        # 三日月の内側 (消し込みを工夫して鋭い三日月に)
-        draw.arc([x-9+ox, y-14+oy, x+16+ox, y+14+oy], 60, 300, fill=0, width=3)
-        
-        # ロゴ内部の方舟 (船体はシンプルに)
-        draw.line([x-2+ox, y+1+oy, x+4+ox, y+1+oy], fill=255)
-        # 象徴的なマスト
-        draw.line([x+ox, y+1+oy, x+ox, y-6+oy], fill=255)
-        # 帆 (三角形)
-        draw.polygon([(x+ox, y-6+oy), (x+5+ox, y-1+oy), (x+ox, y-1+oy)], outline=255)
+    def _draw_pure_crescent(self, draw, x, y, ox, oy):
+        """ロゴを排除した、純粋で美しい三三日月の描画"""
+        # 三日月の外円 (半径12)
+        r_outer = 12
+        draw.chord([x-r_outer+ox, y-r_outer+oy, x+r_outer+ox, y+r_outer+oy], 40, 320, fill=255)
+        # 三日月の内側を削る円 (少し右にずらして鋭さを出す)
+        r_inner = 11
+        draw.chord([x-r_inner+ox+4, y-r_inner+oy, x+r_inner+ox+4, y+r_inner+oy], 0, 360, fill=0)
 
     def draw(self, draw: ImageDraw.Draw, font=None):
         if self.is_blackout: return
@@ -116,11 +111,11 @@ class BCNOFNeScreenSaver:
             if math.sin(s["p"] + self.frame_count * 0.03) > 0.5:
                 draw.point((s["x"]+ox, s["y"]+oy), fill=255)
 
-        # 2. ロゴ (三日月重視)
-        self._draw_crescent_logo(draw, self.LOGO_X, self.LOGO_Y, ox, oy)
+        # 2. 純粋なる三日月 (左上に孤高に輝く)
+        self._draw_pure_crescent(draw, self.MOON_X, self.MOON_Y, ox, oy)
 
-        # 3. 水面反射 (シマー)
-        reflect_x = self.LOGO_X + ox
+        # 3. 水面反射 (三日月の真下)
+        reflect_x = self.MOON_X + ox
         for ry in range(48, self.height, 3):
             shift = math.sin(ry * 0.2 + self.wave_phase * 2) * 4
             sw = random.randint(1, 4)
@@ -143,7 +138,7 @@ class BCNOFNeScreenSaver:
         if len(wave_points) > 1:
             draw.line(wave_points, fill=255, width=1)
 
-        # 5. 大型帆船の描画
+        # 5. 大型帆船の描画 (主役は船体)
         target_y = ship_current_y - 2
         self.ship_y = self.ship_y * 0.5 + target_y * 0.5
         if target_y - self.last_ship_y > 4:
@@ -174,6 +169,5 @@ class BCNOFNeScreenSaver:
 
         # 7. テキスト演出 (たまに右上に)
         if self.frame_count % 400 < 60:
-            # 右上にフェードインっぽく表示 (ドワーフ風)
             draw.text((80+ox, 6+oy), "Crypto Ark", fill=255)
             draw.text((85+ox, 16+oy), ":BCNOFNe", fill=255)
