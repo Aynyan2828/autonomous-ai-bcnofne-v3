@@ -121,8 +121,7 @@ class SystemThermalController:
             
         try:
             from rpi_ws281x import Color
-            # デバッグログ追加
-            logger.info(f"SystemThermalController: Setting RGB -> {rgb_list}")
+            # RGB status logging removed to avoid DB flooding
             
             # ZP-0129のWS281Bへ色送信
             color_val = Color(int(rgb_list[0]), int(rgb_list[1]), int(rgb_list[2]))

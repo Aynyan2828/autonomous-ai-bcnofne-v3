@@ -431,9 +431,45 @@ def update_oled(db: Session):
     if not HARDWARE_AVAILABLE or not oled_display:
         return
 
-    # データの取得
-    ai_status = get_system_state_val(db, "ai_status", "RUNNING")
-    ship_mode = get_system_state_val(db, "ship_mode", "autonomous") # 内部名は小文字のautonomous等になった
+    # データの取得 (DBロック時は前回のデータを使用)
+    try:
+        ai_status = get_system_state_val(db, "ai_status", "RUNNING")
+        ship_mode = get_system_state_val(db, "ship_mode", "autonomous")
+        
+        # Internal State を取得して顔文字に反映
+        latest_state = db.query(InternalStateHistory).order_by(InternalStateHistory.id.desc()).first()
+        if latest_state:
+            ai_face_from_state = INTERNAL_STATE_FACE.get(latest_state.state_name, "(o_o)")
+        else:
+            ai_face_from_state = "(^-^)"
+            
+        goal_raw = get_system_state_val(db, "ai_target_goal", "---")
+        scroll_raw = get_system_state_val(db, "oled_scroll_msg", "System Online")
+        
+        # 成功した場合はキャッシュを更新
+        if not hasattr(update_oled, "cache"):
+            update_oled.cache = {}
+        update_oled.cache.update({
+            "ai_status": ai_status,
+            "ship_mode": ship_mode,
+            "ai_face": ai_face_from_state,
+            "goal": goal_raw,
+            "scroll": scroll_raw
+        })
+    except Exception as e:
+        if "database is locked" in str(e):
+            logger.debug("OLED: DB locked, using cached data for this frame.")
+        else:
+            logger.error(f"OLED: DB error in update_oled: {e}")
+        
+        # キャッシュがなければデフォルト値を使用
+        cache = getattr(update_oled, "cache", {})
+        ai_status = cache.get("ai_status", "RUNNING")
+        ship_mode = cache.get("ship_mode", "autonomous")
+        ai_face_from_state = cache.get("ai_face", "(o_o)")
+        goal_raw = cache.get("goal", "---")
+        scroll_raw = cache.get("scroll", "System Online")
+
     temp = get_cpu_temp()
     
     # Mood calculation
@@ -450,18 +486,15 @@ def update_oled(db: Session):
     except:
         disk_pct = 0.0
     
-    # Network info: First try direct discovery (as we are in host network), 
-    # then fallback to DB
+    # Network info
     d_host_ip, d_ts_ip = discover_ips()
-    
     ip = d_host_ip if d_host_ip != "???" else get_system_state_val(db, "HOST_IP", "???")
     ts_ip = d_ts_ip if d_ts_ip != "???" else get_system_state_val(db, "TAILSCALE_IP", "???")
     
-    # Webhook は表示しない（長すぎてLAN/TS IPが見えなくなるため）
     ip_scroll = f"LAN:{ip} TS:{ts_ip}"
     
     # Scroll message setup
-    new_scroll = clean_text(get_system_state_val(db, "oled_scroll_msg", "System Online"))
+    new_scroll = clean_text(scroll_raw)
     total_scroll = f"{new_scroll} | {ip_scroll}"
     
     if total_scroll != scroll_message:
@@ -469,18 +502,12 @@ def update_oled(db: Session):
         scroll_pos = OLED_WIDTH
 
     # DEST scroll message setup (AI goal - full text scroll)
-    goal_raw = get_system_state_val(db, "ai_target_goal", "---")
     new_dest = clean_text(goal_raw)
     if new_dest != dest_scroll_message:
         dest_scroll_message = new_dest
         dest_scroll_pos = OLED_WIDTH
     
-    # Internal State を取得して顔文字に反映
-    latest_state = db.query(InternalStateHistory).order_by(InternalStateHistory.id.desc()).first()
-    if latest_state:
-        ai_face = INTERNAL_STATE_FACE.get(latest_state.state_name, "(o_o)")
-    else:
-        ai_face = "(^-^)"
+    ai_face = ai_face_from_state
         
     # ハードウェアエラー等による上書き（優先）
     if score < 40 and temp >= 60:
@@ -594,29 +621,30 @@ async def hardware_loop():
             temp = get_cpu_temp()
             load = psutil.cpu_percent()
             
-            # ファン制御はDB不要
+            # 1. ファン制御 (DB不要)
             control_fan(temp, load)
             
-            # OLED更新はDB必要（短寿命セッション）
+            # 2. OLED更新 (DBロック時は内部でキャッチしてキャッシュ描画)
             db = SessionLocal()
             try:
                 update_oled(db)
+            except Exception as e:
+                # update_oled内部で大抵キャッチされるが、念のためここでもガード
+                if "database is locked" not in str(e):
+                    logger.error(f"OLED: update_oled fatal error: {e}")
             finally:
                 db.close()
                 
-            # アイドル判定
+            # 3. アイドル判定 (DBエラーが起きてもこの判定は必ず通るバイ)
             idle_sec = time.time() - last_activity_ts
             if ENABLE_SCREENSAVER and oled_mode == "NORMAL" and idle_sec > SCREENSAVER_IDLE_SECONDS:
                 logger.info(f"OLED: Entering SCREENSAVER mode (Idle: {idle_sec:.0f}s)")
                 oled_mode = "SCREENSAVER"
 
-            await asyncio.sleep(2.0) # 2.0秒に緩和してDB負荷を軽減
+            await asyncio.sleep(2.0)
         except Exception as e:
             logger.error(f"Hardware loop error: {e}")
-            if "database is locked" in str(e):
-                await asyncio.sleep(2.0) # ロック時は長めに待つ
-            else:
-                await asyncio.sleep(1.0)
+            await asyncio.sleep(2.0)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
