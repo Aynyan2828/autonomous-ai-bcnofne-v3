@@ -3,6 +3,7 @@ import sys
 import time
 import asyncio
 import psutil
+import socket
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
@@ -345,6 +346,37 @@ def control_fan(temp, load=0.0):
         except Exception as e:
             logger.error(f"OLED/FAN: Fan control error: {e}")
 
+def discover_ips() -> tuple[str, str]:
+    """Discover host and tailscale IPs directly from interfaces."""
+    host_ip = "???"
+    ts_ip = "???"
+    try:
+        interfaces = psutil.net_if_addrs()
+        for interface, addrs in interfaces.items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET:
+                    ip = addr.address
+                    # Tailscale (100.x.x.x)
+                    if ip.startswith("100."):
+                        ts_ip = ip
+                    # Private LAN (192.168.x.x or 10.x.x.x)
+                    elif (ip.startswith("192.168.") or ip.startswith("10.")) and not ip.startswith("172."):
+                        # 複数のIPがある場合は、最初に見つかったプライベートIPをホストIPとする
+                        if host_ip == "???":
+                            host_ip = ip
+        
+        # もしプライベートIPが見つからなければ、ループバック以外を適当に拾う
+        if host_ip == "???":
+            for interface, addrs in interfaces.items():
+                for addr in addrs:
+                    if addr.family == socket.AF_INET and not addr.address.startswith("127."):
+                        host_ip = addr.address
+                        break
+    except Exception as e:
+        logger.error(f"OLED: IP detection failed: {e}")
+        
+    return host_ip, ts_ip
+
 def get_system_state_val(db: Session, key: str, default: str) -> str:
     # 別プロセス（core等）が書き込んだ最新の値を読むため、キャッシュを破棄してからクエリ
     db.expire_all()
@@ -404,9 +436,12 @@ def update_oled(db: Session):
     except:
         disk_pct = 0.0
     
-    # Network info from DB (updated by core on startup)
-    ip = get_system_state_val(db, "HOST_IP", "??") 
-    ts_ip = get_system_state_val(db, "TAILSCALE_IP", "??")
+    # Network info: First try direct discovery (as we are in host network), 
+    # then fallback to DB
+    d_host_ip, d_ts_ip = discover_ips()
+    
+    ip = d_host_ip if d_host_ip != "???" else get_system_state_val(db, "HOST_IP", "???")
+    ts_ip = d_ts_ip if d_ts_ip != "???" else get_system_state_val(db, "TAILSCALE_IP", "???")
     
     # Webhook は表示しない（長すぎてLAN/TS IPが見えなくなるため）
     ip_scroll = f"LAN:{ip} TS:{ts_ip}"
