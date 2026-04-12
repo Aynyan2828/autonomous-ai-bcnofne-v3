@@ -12,8 +12,8 @@ class BCNOFNeScreenSaver:
         
         # 月の状態 (軌道運行)
         self.moon_progress = 0.0
-        # 時間ベースのスピード (1秒あたりの進捗)
-        self.moon_orbit_speed = 0.45 # 0.015 * 30fps
+        # 1/4に減速 (0.45 -> 0.11)
+        self.moon_orbit_speed = 0.11
         self.moon_radius = 10
         self.moon_x = -20
         self.moon_y = 50
@@ -58,7 +58,7 @@ class BCNOFNeScreenSaver:
         
         self.frame_count += 1
         
-        # 1. 月の軌道更新 (Delta Time 依存)
+        # 1. 月の軌道更新 (1/4減速)
         self.moon_progress += self.moon_orbit_speed * dt
         if self.moon_progress > 1.6:
             self.moon_progress = 0.0
@@ -70,11 +70,11 @@ class BCNOFNeScreenSaver:
         else:
             self.moon_y = 80
         
-        # 2. 波と波の更新 (Delta Time 依存)
-        # 0.6 * 30fps = 18.0 / 1.25 * 30 = 37.5
-        self.wave_phase += 18.0 * dt
-        self.wave_phase_fast += 37.5 * dt
-        self.amplitude_factor = 0.9 + math.sin(now * 1.2) * 0.25
+        # 2. 波と波の更新 (1/4減速)
+        # 18.0 -> 4.5 / 37.5 -> 9.4
+        self.wave_phase += 4.5 * dt
+        self.wave_phase_fast += 9.4 * dt
+        self.amplitude_factor = 0.9 + math.sin(now * 0.3) * 0.25
         
         # 3. パーティクル
         new_particles = []
@@ -110,10 +110,10 @@ class BCNOFNeScreenSaver:
                 })
 
     def _draw_3d_moon_logic(self, draw, x, y, ox, oy):
-        """3D回転 (Delta Time 依存)"""
+        """3D回転 (1/4減速)"""
         r = self.moon_radius
-        # 0.15 * 30fps = 4.5
-        phi = time.time() * 4.5
+        # 4.5 -> 1.12
+        phi = time.time() * 1.12
         
         draw.ellipse([x-r+ox, y-r+oy, x+r+ox, y+r+oy], fill=255)
         shadow_w = math.sin(phi) * r * 2.2
