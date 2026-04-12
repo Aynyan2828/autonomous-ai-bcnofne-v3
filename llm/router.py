@@ -45,7 +45,10 @@ class ModelRouter:
         local_cfg = self._config.get("providers", {}).get("local", {})
         openai_cfg = self._config.get("providers", {}).get("openai", {})
         
-        local = OllamaProvider(base_url=local_cfg.get("base_url"))
+        # OLLAMA_BASE_URL 環境変数を最優先にする
+        ollama_url = os.getenv("OLLAMA_BASE_URL") or local_cfg.get("base_url", "http://ollama:11434")
+        
+        local = OllamaProvider(base_url=ollama_url)
         openai = OpenAIProvider(api_key=os.getenv(openai_cfg.get("api_key_env", "OPENAI_API_KEY")))
         
         if backend == "local":

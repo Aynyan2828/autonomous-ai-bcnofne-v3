@@ -561,13 +561,13 @@ async def hardware_loop():
             finally:
                 db.close()
                 
-            await asyncio.sleep(0.5) # 0.5秒に緩和してDB負荷を軽減
+            await asyncio.sleep(2.0) # 2.0秒に緩和してDB負荷を軽減
         except Exception as e:
             logger.error(f"Hardware loop error: {e}")
             if "database is locked" in str(e):
-                await asyncio.sleep(1.0) # ロック時は長めに待つ
+                await asyncio.sleep(2.0) # ロック時は長めに待つ
             else:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1.0)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
