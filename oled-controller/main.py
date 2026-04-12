@@ -123,7 +123,7 @@ def show_boot_animation():
         image = logo.copy() if logo else Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
         draw = ImageDraw.Draw(image)
         
-        # テキスト背景の黒塗り（元のロジック通り）
+        # 背景とチェック項目（オリジナル復元）
         draw.rectangle((0, 0, 110, 10), fill=0)
         draw.text((0, 0), "--- SYSTEM CHECK ---", font=ImageFont.load_default(), fill=255)
         
@@ -131,7 +131,7 @@ def show_boot_animation():
         draw.rectangle((0, y_pos, 120, y_pos + 9), fill=0)
         draw.text((0, y_pos), f"[ OK ] {label}", font=ImageFont.load_default(), fill=255)
             
-        # プログレスバー（元のロジック通り fill=0 を追加）
+        # プログレスバー（オリジナル復元 fill=0, outline=255）
         bar_y, bar_h = 54, 8
         draw.rectangle((0, bar_y, OLED_WIDTH - 1, bar_y + bar_h), outline=255, fill=0)
         progress_w = int((i + 1) / total_checks * (OLED_WIDTH - 4))
@@ -219,10 +219,12 @@ def control_fan(temp, load=0.0):
     if fan_ctrl:
         try:
             fan_ctrl.update(temp, load)
-            fan_status = fan_ctrl.get_status()
-            if fan_status["status"] != getattr(control_fan, "last_label", ""):
-                control_fan.last_label = fan_status["status"]
-                logger.debug(f"OLED/FAN: Status -> {fan_status['status']} ({temp:.1f}C)")
+            new_status = fan_ctrl.get_status()
+            if new_status["status"] != fan_status.get("status", ""):
+                fan_status = new_status
+                logger.info(f"OLED/FAN: Status Changed -> {fan_status['status']} (Temp:{temp:.1f}C, Duty:{fan_status['duty']}%)")
+            else:
+                fan_status = new_status
         except: pass
 
 def discover_ips():
@@ -296,7 +298,7 @@ def update_oled(db: Session):
     c = update_oled.cache
     temp = get_cpu_temp()
     score, _ = compute_mood(temp, c["ai_status"], c["ship_mode"])
-    m_disp = SHIP_MODE_DISPLAY.get(c["ship_mode"], "SAIL")
+    m_disp = SHIP_MODE_DISPLAY.get(c["ship_mode"], "SAIL  >===>")
     m_emoji = SHIP_MODE_EMOJI.get(c["ship_mode"], "[~]")
     try: disk = psutil.disk_usage('/').percent
     except: disk = 0.0
@@ -309,13 +311,22 @@ def update_oled(db: Session):
     cur = {"stat":c["ai_status"], "mode":c["ship_mode"], "dest":new_dest, "msg":c["scroll"]}
     if cur != last_display_data:
         last_display_data, last_activity_ts = cur, now
-        if oled_mode != "NORMAL": oled_mode = "NORMAL"
+        if oled_mode != "NORMAL":
+            oled_mode = "NORMAL"
+            logger.info("OLED: Activity detected. Returning to NORMAL mode.")
 
     image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
     draw = ImageDraw.Draw(image)
     if not hasattr(update_oled, "font"):
+        jp_fonts = [
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+            "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
         update_oled.font = ImageFont.load_default()
-        for p in ["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"]:
+        for p in jp_fonts:
             if os.path.exists(p):
                 update_oled.font = ImageFont.truetype(p, 10); break
     f = update_oled.font
@@ -323,7 +334,8 @@ def update_oled(db: Session):
     if score < 40 and temp >= 60: ai_f = "(x_x)"
     elif c["ai_status"] == "STOPPED": ai_f = "(-_-)"
 
-    draw.text((0, 0), f"BCN:{m_disp} {m_emoji}", font=f, fill=255)
+    # オリジナルのフルネーム表記復元: BCNOFNe:
+    draw.text((0, 0), clean_text(f"BCNOFNe:{m_disp} {m_emoji}"), font=f, fill=255)
     draw.text((dest_scroll_pos, 11), f"DEST:{dest_scroll_message}", font=f, fill=255)
     draw.text((0, 22), f"AI: {ai_f}", font=f, fill=255)
     draw.text((0, 33), f"TEMP:{temp:.0f}C DISK:{disk:.0f}%", font=f, fill=255)
@@ -357,7 +369,7 @@ async def hardware_loop():
                 oled_mode = "SCREENSAVER"
             await asyncio.sleep(0.5)
         except Exception as e:
-            logger.error(f"Loop error: {e}")
+            logger.error(f"Hardware loop error: {e}")
             await asyncio.sleep(1.0)
 
 @asynccontextmanager
@@ -367,10 +379,19 @@ async def lifespan(app: FastAPI):
     task.cancel()
     if HARDWARE_AVAILABLE:
         show_shutdown_animation()
+        if fan_ctrl: fan_ctrl.stop()
         if pi: pi.stop()
 
 app.router.lifespan_context = lifespan
 
 @app.get("/health")
 def health_check():
-    return {"status":"ok", "fan":fan_status, "temp":get_cpu_temp()}
+    # 外部連携(n8n等)との互換性を保つため、オリジナルと100%同一のフラット構造で返却
+    return {
+        "status": "ok",
+        "service": "oled-controller",
+        "hardware_present": HARDWARE_AVAILABLE,
+        "fan_duty": fan_status.get("duty", 0),
+        "fan_rpm": fan_status.get("rpm", 0),
+        "cpu_temp": get_cpu_temp()
+    }
