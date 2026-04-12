@@ -139,7 +139,8 @@ class BCNOFNeScreenSaver:
         白い円の上に黒い楕円を重ねて満ち欠けを表現。
         """
         r = self.moon_radius
-        phi = self.frame_count * 0.05
+        # 回転スピードを3倍に高速化 (0.05 -> 0.15)
+        phi = self.frame_count * 0.15
         
         # 1. 土台の白円
         draw.ellipse([x-r+ox, y-r+oy, x+r+ox, y+r+oy], fill=255)
