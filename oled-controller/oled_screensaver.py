@@ -10,154 +10,179 @@ class BCNOFNeScreenSaver:
         self.frame_count = 0
         
         # 固有状態
-        self.ship_y_offset = 0
-        self.ship_dir = 1
         self.wave_phase = 0
+        self.wave_phase2 = 0
+        self.ship_x = 80
+        self.ship_y = 0
+        self.ship_tilt = 0
         
         # 焼け防止用オフセット
         self.burn_offset_x = 0
         self.burn_offset_y = 0
         self.last_offset_change = time.time()
         
-        # 星空の状態 (x, y, brightness_phase)
+        # 星空の状態 (x, y, type: 0=small, 1=twinkle)
         self.stars = [
-            [random.randint(0, width-1), random.randint(0, 30), random.random() * math.pi]
-            for _ in range(12)
+            {"x": random.randint(0, width-1), "y": random.randint(0, 40), "type": random.randint(0, 1), "p": random.random() * math.pi}
+            for _ in range(15)
         ]
         
-        # テキスト表示状態
-        self.overlay_text = ""
-        self.text_timer = 0
-        self.messages = ["BCNOFNe", "DEST: SAIL", "AYN ONLINE", "IDLE DRIFT", "SIGNAL OK"]
+        # ロゴ周辺の粒子
+        self.particles = [
+            {"x": 20 + random.randint(-15, 15), "y": 15 + random.randint(-10, 10), "vx": random.uniform(-0.5, 0.5), "vy": random.uniform(-0.5, 0.5)}
+            for _ in range(8)
+        ]
         
-        # 暗転管理
+        # 演出状態: 0=NORMAL, 1=SILENCE (Logo only), 2=BLACKOUT
+        self.mode = 0
+        self.last_mode_change = time.time()
         self.is_blackout = False
-        self.last_blackout_ts = time.time()
 
     def update(self):
         """内部状態を更新する"""
         self.frame_count += 1
         
-        # 波の位相 (ダイナミックに動かす)
-        self.wave_phase += 0.15
+        # 波の位相
+        self.wave_phase += 0.08
+        self.wave_phase2 += 0.12
         
         # 星の点滅
-        for i in range(len(self.stars)):
-            self.stars[i][2] += 0.05
+        for s in self.stars:
+            s["p"] += 0.05
             
-        # 焼け防止オフセット
+        # 粒子の移動
+        for p in self.particles:
+            p["x"] += p["vx"]
+            p["y"] += p["vy"]
+            if abs(p["x"] - 20) > 20: p["vx"] *= -1
+            if abs(p["y"] - 15) > 15: p["vy"] *= -1
+            
+        # 船の移動
+        self.ship_x = 80 + math.sin(self.wave_phase * 0.4) * 10
+            
+        # 演出フェーズの切り替え
         now = time.time()
-        if now - self.last_offset_change > 15:
-            self.burn_offset_x = random.randint(-4, 4)
-            self.burn_offset_y = random.randint(-2, 2)
-            self.last_offset_change = now
-            
-        # 低頻度テキストの更新
-        if self.text_timer > 0:
-            self.text_timer -= 1
-        elif random.random() < 0.02: # 稀に表示
-            self.overlay_text = random.choice(self.messages)
-            self.text_timer = 30 # 約10-15秒（ループ間欠に依存）
-        else:
-            self.overlay_text = ""
-
-        # 暗転管理
-        cycle_time = now - self.last_blackout_ts
-        if cycle_time > 45:
-            self.is_blackout = True
-            if cycle_time > 46.5:
+        cycle_time = now - self.last_mode_change
+        
+        if self.mode == 0: # NORMAL (45s)
+            if cycle_time > 45:
+                self.mode = 1
+                self.last_mode_change = now
+        elif self.mode == 1: # SILENCE (Logo only) (10s)
+            if cycle_time > 10:
+                self.mode = 2
+                self.is_blackout = True
+                self.last_mode_change = now
+        elif self.mode == 2: # BLACKOUT (2s)
+            if cycle_time > 2:
+                self.mode = 0
                 self.is_blackout = False
-                self.last_blackout_ts = now
+                self.last_mode_change = now
+                # 暗転明けにオフセット変更
+                self.burn_offset_x = random.randint(-4, 4)
+                self.burn_offset_y = random.randint(-2, 2)
+
+    def _draw_celestial_logo(self, draw, x, y, ox, oy, scale=1.0):
+        """月と船が融合した幻想的なロゴを描画"""
+        # 月 (三日月)
+        draw.arc([x-10+ox, y-10+oy, x+10+ox, y+10+oy], 40, 320, fill=255, width=1)
+        # ロゴ内の小さな船のシルエット
+        draw.line([x-2+ox, y+2+oy, x+6+ox, y+2+oy], fill=255) # 船体
+        draw.line([x+ox, y+2+oy, x+ox, y-4+oy], fill=255) # マスト
+        draw.line([x+ox, y-4+oy, x+4+ox, y+oy], fill=255) # 帆
 
     def draw(self, draw: ImageDraw.Draw, font=None):
-        """北斎風の大波と帆船を描画するバイ"""
+        """Celestial Voyage Mode を描画するバイ"""
         if self.is_blackout:
             return
 
         ox = self.burn_offset_x
         oy = self.burn_offset_y
-
-        # 1. 星空
-        for x, y, phase in self.stars:
-            if math.sin(phase) > 0.3:
-                draw.point((x + ox, y + oy), fill=255)
-
-        # 2. 北斎風の大波を描画
-        wave_points = []
-        ship_x = 50 + math.sin(self.wave_phase * 0.5) * 15 # 船のX位置もゆったり動く
-        ship_wave_y = 0
-
-        for x in range(-10, self.width + 10, 2):
-            # 複数のサイン波を組み合わせて「うねり」を表現
-            # 大きなうねり + 細かい波
-            y_base = 48
-            wave1 = math.sin(x * 0.05 + self.wave_phase) * 8
-            wave2 = math.sin(x * 0.12 + self.wave_phase * 2) * 3
-            y = y_base + wave1 + wave2
-            
-            wave_points.append((x + ox, y + oy))
-            
-            # 船の位置の波の高さを記憶
-            if abs(x - ship_x) < 2:
-                ship_wave_y = y
-
-        # 波の描画 (塗りつぶし風に線を重ねるか、ポリゴンで描く)
-        if len(wave_points) > 1:
-            draw.line(wave_points, fill=255, width=1)
-            # 波の下を少しだけ埋める（奥行き感）
-            fill_points = wave_points + [(self.width+10+ox, self.height+oy), (-10+ox, self.height+oy)]
-            # 線の密度で表現（点描風）
-            for i in range(len(wave_points)-1):
-                px, py = wave_points[i]
-                if i % 4 == 0:
-                    draw.line((px, py, px, py + 3), fill=255)
-
-        # 3. かっこいい帆船シルエット
-        # 船は波の高さに合わせて上下し、少し傾ける
-        ship_y = ship_wave_y - 2 # 波の少し上に配置
-        tilt = math.cos(ship_x * 0.05 + self.wave_phase) * 0.2
         
-        def rotate_point(px, py, cx, cy, angle):
-            s, c = math.sin(angle), math.cos(angle)
-            nx = (px - cx) * c - (py - cy) * s + cx
-            ny = (px - cx) * s + (py - cy) * c + cy
-            return nx + ox, ny + oy
+        logo_center_x, logo_center_y = 20, 15
 
-        cx, cy = ship_x, ship_y
-        # 船体 (大きめの帆船)
-        hull = [
-            rotate_point(ship_x - 12, ship_y, cx, cy, tilt),
-            rotate_point(ship_x + 14, ship_y - 2, cx, cy, tilt),
-            rotate_point(ship_x + 10, ship_y + 6, cx, cy, tilt),
-            rotate_point(ship_x - 10, ship_y + 6, cx, cy, tilt)
-        ]
-        draw.polygon(hull, outline=255, fill=0)
-        
-        # メインマストと大きな帆
-        draw.line(rotate_point(ship_x, ship_y, cx, cy, tilt) + 
-                  rotate_point(ship_x, ship_y - 18, cx, cy, tilt), fill=255)
-        sail1 = [
-            rotate_point(ship_x + 1, ship_y - 17, cx, cy, tilt),
-            rotate_point(ship_x + 12, ship_y - 10, cx, cy, tilt),
-            rotate_point(ship_x + 1, ship_y - 3, cx, cy, tilt)
-        ]
-        draw.polygon(sail1, outline=255, fill=0)
-
-        # 前方のマストと帆
-        draw.line(rotate_point(ship_x - 6, ship_y, cx, cy, tilt) + 
-                  rotate_point(ship_x - 6, ship_y - 12, cx, cy, tilt), fill=255)
-        sail2 = [
-            rotate_point(ship_x - 5, ship_y - 11, cx, cy, tilt),
-            rotate_point(ship_x + 2, ship_y - 8, cx, cy, tilt),
-            rotate_point(ship_x - 5, ship_y - 4, cx, cy, tilt)
-        ]
-        draw.polygon(sail2, outline=255, fill=0)
-
-        # 4. オーバーレイテキスト
-        if self.overlay_text:
-            text_x = 40 + random.randint(-5, 5) # テキストも位置を揺らす
-            text_y = 15 + random.randint(-2, 2)
-            if font:
-                draw.text((text_x + ox, text_y + oy), self.overlay_text, font=font, fill=255)
+        # 1. 星空 (NORMAL / SILENCE)
+        for s in self.stars:
+            if s["type"] == 0:
+                if math.sin(s["p"]) > 0: draw.point((s["x"] + ox, s["y"] + oy), fill=255)
             else:
-                draw.text((text_x + ox, text_y + oy), self.overlay_text, fill=255)
+                sz = 1 if math.sin(s["p"]) > 0.5 else 0
+                if sz > 0: draw.point((s["x"] + ox, s["y"] + oy), fill=255)
+
+        # 2. 粒子の演出 (Logo周辺)
+        for p in self.particles:
+            if random.random() > 0.3:
+                draw.point((p["x"] + ox, p["y"] + oy), fill=255)
+
+        # 3. 波の描画 (NORMAL時のみ)
+        ship_wave_y = 52
+        if self.mode == 0:
+            # 遠景の波
+            for x in range(0, self.width, 4):
+                yw = 48 + math.sin(x * 0.1 + self.wave_phase) * 3
+                draw.point((x + ox, yw + oy), fill=255)
+            
+            # 近景の波
+            wave_points = []
+            for x in range(-5, self.width + 5, 2):
+                yw = 54 + math.sin(x * 0.08 + self.wave_phase2) * 5
+                wave_points.append((x+ox, yw+oy))
+                if abs(x - self.ship_x) < 2:
+                    ship_wave_y = yw
+            
+            if len(wave_points) > 1:
+                draw.line(wave_points, fill=255, width=1)
+                # 水面反射の歪み用領域
+                for i in range(0, len(wave_points)-1, 4):
+                    px, py = wave_points[i]
+                    draw.point((px, py+2), fill=255)
+
+        # 4. 水面反射 (ロゴの真下に)
+        reflection_y_base = 56
+        if self.mode in [0, 1]:
+            # 波のゆらぎに応じて反射を左右にずらす
+            reflect_offset = math.sin(self.wave_phase2) * 2
+            # 反射された月 (間引いて描画して透け感を出す)
+            ry = reflection_y_base
+            draw.arc([logo_center_x-8+ox+reflect_offset, ry+oy, logo_center_x+8+ox+reflect_offset, ry+12+oy], 180, 0, fill=255)
+            if self.frame_count % 2 == 0:
+                draw.line([logo_center_x-5+ox+reflect_offset, ry+5+oy, logo_center_x+5+ox+reflect_offset, ry+5+oy], fill=255)
+
+        # 5. セレスティアル・ロゴ
+        self._draw_celestial_logo(draw, logo_center_x, logo_center_y, ox, oy)
+
+        # 6. 船 (NORMAL時のみ)
+        if self.mode == 0:
+            sx, sy = self.ship_x, ship_wave_y - 2
+            tilt = math.sin(self.wave_phase2) * 0.15
+            
+            def rot(px, py, cx, cy, angle):
+                s, c = math.sin(angle), math.cos(angle)
+                nx = (px - cx) * c - (py - cy) * s + cx
+                ny = (px - cx) * s + (py - cy) * c + cy
+                return nx + ox, ny + oy
+
+            # 船体
+            hull = [
+                rot(sx-8, sy, sx, sy, tilt),
+                rot(sx+10, sy-1, sx, sy, tilt),
+                rot(sx+7, sy+4, sx, sy, tilt),
+                rot(sx-6, sy+4, sx, sy, tilt)
+            ]
+            draw.polygon(hull, outline=255, fill=0)
+            # マスト
+            draw.line(rot(sx, sy, sx, sy, tilt) + rot(sx, sy-10, sx, sy, tilt), fill=255)
+            # 帆
+            draw.polygon([rot(sx+1, sy-9, sx, sy, tilt), rot(sx+8, sy-5, sx, sy, tilt), rot(sx+1, sy-2, sx, sy, tilt)], outline=255)
+            # 船尾灯 (小さな点明滅)
+            if self.frame_count % 10 < 7:
+                draw.point(rot(sx-8, sy+1, sx, sy, tilt), fill=255)
+
+        # 7. テキスト演出 (画像と同じ Crypto Ark : BCNOFNe)
+        if self.mode == 0:
+            # 遠くの水平線付近に薄っすら表示
+            draw.text((35+ox, 35+oy), "Crypto Ark : BCNOFNe", fill=255)
+        elif self.mode == 1:
+            # 静寂フェーズでは中央に
+            draw.text((32+ox, 30+oy), "Celestial Voyage", fill=255)
+            draw.text((35+ox, 40+oy), "BCNOFNe", fill=255)
