@@ -2,13 +2,11 @@ import os
 import asyncio
 import httpx
 import logging
-from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("llm.health")
 
 async def check_ollama():
-    load_dotenv()
     base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
     mode = os.getenv("AI_PROVIDER_MODE", "local_preferred")
     
