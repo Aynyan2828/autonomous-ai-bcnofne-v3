@@ -11,7 +11,7 @@ class BCNOFNeScreenSaver:
         
         # 月の状態 (軌道運行)
         self.moon_progress = 0.0 # 0.0 to 1.0 (昇ってから沈むまで)
-        self.moon_orbit_speed = 0.003
+        self.moon_orbit_speed = 0.015 # 5倍速に変更 (0.003 -> 0.015)
         self.moon_radius = 10
         self.moon_x = -20
         self.moon_y = 50
@@ -68,10 +68,10 @@ class BCNOFNeScreenSaver:
         else:
             self.moon_y = 80 # 画面外
         
-        # 2. 波と波の更新
-        self.wave_phase += 0.12
-        self.wave_phase_fast += 0.25
-        self.amplitude_factor = 0.9 + math.sin(self.frame_count * 0.04) * 0.25
+        # 2. 波と波の更新 (5倍速に変更)
+        self.wave_phase += 0.6     # 0.12 * 5
+        self.wave_phase_fast += 1.25  # 0.25 * 5
+        self.amplitude_factor = 0.9 + math.sin(self.frame_count * 0.2) * 0.25 # 周期を5倍に
         
         # 3. パーティクル
         new_particles = []
