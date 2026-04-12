@@ -155,25 +155,25 @@ class BCNOFNeScreenSaver:
             return nx + ox, ny + oy
 
         cx, cy = self.ship_x, self.ship_y
-        # 巨大船体 (左を舳先にするバイ)
+        # 巨大船体 (右を舳先に戻すバイ)
         hull = [
-            r(cx-18, cy-1), # 舳先 (左上)
-            r(cx+16, cy),   # 船尾 (右上)
-            r(cx+13, cy+7), # 船尾 (右下)
-            r(cx-14, cy+7)  # 舳先 (左下)
+            r(cx-16, cy),   # 船尾 (左上)
+            r(cx+18, cy-1), # 舳先 (右上)
+            r(cx+14, cy+7), # 舳先 (右下)
+            r(cx-13, cy+7)  # 船尾 (左下)
         ]
         draw.polygon(hull, outline=255, fill=0)
         
-        # バランスよい帆とマスト (左に向かって膨らむバイ)
-        # メインマスト
-        draw.line(r(cx, cy) + r(cx, cy-18), fill=255)
-        draw.polygon([r(cx-1, cy-17), r(cx-10, cy-10), r(cx-1, cy-3)], outline=255)
-        # 後方マスト
-        draw.line(r(cx+7, cy) + r(cx+7, cy-12), fill=255)
-        draw.polygon([r(cx+6, cy-11), r(cx, cy-7), r(cx+6, cy-3)], outline=255)
+        # バランスよい帆とマスト (右向き・追い風バイ)
+        # メインマスト (中央)
+        draw.line(r(cx, cy) + r(cx, cy-20), fill=255)
+        draw.polygon([r(cx+1, cy-19), r(cx+12, cy-11), r(cx+1, cy-3)], outline=255)
+        # 前方マスト
+        draw.line(r(cx-8, cy) + r(cx-8, cy-13), fill=255)
+        draw.polygon([r(cx-7, cy-12), r(cx+1, cy-8), r(cx-7, cy-3)], outline=255)
         
-        # 航海灯 (船尾＝右側に配置)
-        if self.frame_count % 10 < 7: draw.point(r(cx+15, cy+1), fill=255)
+        # 航海灯 (船尾＝左側に配置)
+        if self.frame_count % 10 < 7: draw.point(r(cx-15, cy+1), fill=255)
 
         # 6. 飛沫パーティクルの描画
         for p in self.particles: 
