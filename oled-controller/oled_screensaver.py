@@ -96,11 +96,11 @@ class BCNOFNeScreenSaver:
                 })
 
     def _draw_pure_crescent(self, draw, x, y, ox, oy):
-        """ピュアな三日月"""
-        r_outer = 13
-        draw.chord([x-r_outer+ox, y-r_outer+oy, x+r_outer+ox, y+r_outer+oy], 40, 320, fill=255)
-        r_inner = 12
-        draw.chord([x-r_inner+ox+5, y-r_inner+oy, x+r_inner+ox+5, y+r_inner+oy], 0, 360, fill=0)
+        """塗りつぶさず、輪郭だけで描く美しい三日月"""
+        # 三日月の外側の弧
+        draw.arc([x-13+ox, y-13+oy, x+13+ox, y+13+oy], 40, 320, fill=255, width=1)
+        # 三日月の内側の弧 (重なりを深くして三日月感を出す)
+        draw.arc([x-10+ox, y-13+oy, x+15+ox, y+13+oy], 65, 295, fill=255, width=1)
 
     def draw(self, draw: ImageDraw.Draw, font=None):
         if self.is_blackout: return
