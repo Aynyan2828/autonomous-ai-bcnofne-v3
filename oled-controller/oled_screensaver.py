@@ -9,9 +9,13 @@ class BCNOFNeScreenSaver:
         self.height = height
         self.frame_count = 0
         
-        # 定数
-        self.MOON_X = 24
-        self.MOON_Y = 18
+        # 月の状態 (3D回転 & 自由移動)
+        self.moon_x = random.randint(20, width - 20)
+        self.moon_y = random.randint(10, 30)
+        self.moon_vx = random.uniform(0.2, 0.5) * random.choice([1, -1])
+        self.moon_vy = random.uniform(0.1, 0.3) * random.choice([1, -1])
+        self.moon_phi = random.random() * 2 * math.pi # 回転角 (満ち欠け)
+        self.moon_radius = 10
         
         # 波の状態
         self.wave_phase = 0
@@ -19,16 +23,16 @@ class BCNOFNeScreenSaver:
         self.amplitude_factor = 1.0
         
         # 船の状態
-        self.ship_x = 64 # 中央付近へ
+        self.ship_x = 64
         self.ship_y = 40
         self.ship_tilt = 0
         self.last_ship_y = 40
         
         # 飛沫（パーティクル）管理
         self.particles = [] # {"x", "y", "vx", "vy", "life"}
-        self.MAX_PARTICLES = 60 # 増量！幅広く飛沫を飛ばす
+        self.MAX_PARTICLES = 50
         
-        # 焼け防止
+        # 焼け防止用オフセット
         self.burn_offset_x = 0
         self.burn_offset_y = 0
         self.last_offset_change = time.time()
@@ -43,33 +47,37 @@ class BCNOFNeScreenSaver:
         self.is_blackout = False
         self.last_blackout_ts = time.time()
 
-    def _generate_storm_wave(self, x, phase, phase_fast, amp_mod):
-        """北斎風の鋭い波形生成"""
-        base_y = 46
-        sine1 = math.sin(x * 0.07 + phase)
-        # 山を鋭く、谷を浅く
-        wave1 = math.pow(abs(sine1), 0.55) * (15.0 if sine1 > 0 else -6.0)
-        wave2 = math.sin(x * 0.18 + phase_fast) * 4
-        return base_y + (wave1 + wave2) * amp_mod
-
     def update(self):
         self.frame_count += 1
-        self.wave_phase += 0.13
-        self.wave_phase_fast += 0.28
-        self.amplitude_factor = 1.0 + math.sin(self.frame_count * 0.05) * 0.3
         
-        # パーティクルの更新
+        # 1. 月の物理移動
+        self.moon_x += self.moon_vx
+        self.moon_y += self.moon_vy
+        # 壁との衝突判定 (マージンを持たせる)
+        if self.moon_x < 15 or self.moon_x > self.width - 15:
+            self.moon_vx *= -1
+        if self.moon_y < 10 or self.moon_y > self.height - 20:
+            self.moon_vy *= -1
+            
+        # 2. 月の3D回転 (満ち欠け)
+        self.moon_phi += 0.03
+        
+        # 3. 波とパーティクル
+        self.wave_phase += 0.12
+        self.wave_phase_fast += 0.25
+        self.amplitude_factor = 0.9 + math.sin(self.frame_count * 0.04) * 0.25
+        
         new_particles = []
         for p in self.particles:
             p["x"] += p["vx"]
             p["y"] += p["vy"]
-            p["vy"] += 0.45 # 少し重力を強めに
+            p["vy"] += 0.4
             p["life"] -= 1
             if p["life"] > 0 and 0 <= p["x"] < self.width and 0 <= p["y"] < self.height:
                 new_particles.append(p)
         self.particles = new_particles
         
-        # 焼け防止
+        # 4. 焼け防止
         now = time.time()
         if now - self.last_offset_change > 15:
             self.burn_offset_x = random.randint(-4, 4)
@@ -83,24 +91,66 @@ class BCNOFNeScreenSaver:
                 self.is_blackout = False
                 self.last_blackout_ts = now
 
-    def _spawn_spray(self, x, y, count=1, heavy=False):
+    def _spawn_spray(self, x, y, count=1):
         for _ in range(count):
             if len(self.particles) < self.MAX_PARTICLES:
-                vx = random.uniform(-2.0, 2.0) if heavy else random.uniform(-1.0, 1.0)
-                vy = random.uniform(-4.0, -1.0) if heavy else random.uniform(-2.0, -0.5)
                 self.particles.append({
                     "x": x, "y": y,
-                    "vx": vx,
-                    "vy": vy,
-                    "life": random.randint(8, 20)
+                    "vx": random.uniform(-1.5, 1.5),
+                    "vy": random.uniform(-2.5, -0.8),
+                    "life": random.randint(6, 15)
                 })
 
-    def _draw_pure_crescent(self, draw, x, y, ox, oy):
-        """塗りつぶさず、輪郭だけで描く美しい三日月"""
-        # 三日月の外側の弧
-        draw.arc([x-13+ox, y-13+oy, x+13+ox, y+13+oy], 40, 320, fill=255, width=1)
-        # 三日月の内側の弧 (重なりを深くして三日月感を出す)
-        draw.arc([x-10+ox, y-13+oy, x+15+ox, y+13+oy], 65, 295, fill=255, width=1)
+    def _draw_3d_moon(self, draw, x, y, ox, oy):
+        """
+        円と楕円の影を組み合わせて3D回転（満ち欠け）を表現する。
+        """
+        r = self.moon_radius
+        phi = self.moon_phi % (2 * math.pi)
+        
+        # 基本の白円 (月本体)
+        draw.ellipse([x-r+ox, y-r+oy, x+r+ox, y+r+oy], fill=255)
+        
+        # 位相に応じた影の描画
+        # cos(phi) で影の幅を決定
+        w_factor = math.cos(phi)
+        abs_w = abs(w_factor) * r
+        
+        if 0 <= phi < math.pi:
+            # 満月 -> 新月 (右から影が迫る)
+            if w_factor > 0:
+                # 三日月 (左側が明るい)
+                draw.ellipse([x-abs_w+ox, y-r+oy, x+abs_w+ox, y+r+oy], fill=0)
+                # 左半分を削るなどして調整が必要だが、中心をずらした楕円で代用
+                draw.ellipse([x-r+ox+ (r - abs_w), y-r+oy, x+r+ox + (r - abs_w), y+r+oy], fill=0)
+            else:
+                # 逆三日月 (右側が明るい)
+                draw.ellipse([x-r+ox - (r - abs_w), y-r+oy, x+r+ox - (r - abs_w), y+r+oy], fill=0)
+        else:
+            # 新月 -> 満月
+            if w_factor < 0:
+                draw.ellipse([x-r+ox - (r - abs_w), y-r+oy, x+r+ox - (r - abs_w), y+r+oy], fill=0)
+            else:
+                draw.ellipse([x-r+ox + (r - abs_w), y-r+oy, x+r+ox + (r - abs_w), y+r+oy], fill=0)
+
+    def _draw_pure_crescent_logic(self, draw, x, y, ox, oy):
+        """
+        よりシンプルな3D回転ロジック:
+        白い円の上に黒い楕円を重ねて満ち欠けを表現。
+        """
+        r = self.moon_radius
+        phi = self.frame_count * 0.05
+        
+        # 1. 土台の白円
+        draw.ellipse([x-r+ox, y-r+oy, x+r+ox, y+r+oy], fill=255)
+        
+        # 2. 影のパラメータ
+        # 影の幅を -2r から 2r まで変化させる
+        shadow_w = math.sin(phi) * r * 2.2
+        
+        # 影の楕円を描画 (中心を少しずらして三日月を形作る)
+        # shadow_w が正なら右から、負なら左から影
+        draw.ellipse([x+ox-r+shadow_w, y+oy-r-1, x+ox+r+shadow_w, y+oy+r+1], fill=0)
 
     def draw(self, draw: ImageDraw.Draw, font=None):
         if self.is_blackout: return
@@ -108,45 +158,53 @@ class BCNOFNeScreenSaver:
 
         # 1. 星空
         for s in self.stars:
-            if math.sin(s["p"] + self.frame_count * 0.04) > 0.4:
+            if math.sin(s["p"] + self.frame_count * 0.03) > 0.5:
                 draw.point((s["x"]+ox, s["y"]+oy), fill=255)
 
-        # 2. 三日月 (左上)
-        self._draw_pure_crescent(draw, self.MOON_X, self.MOON_Y, ox, oy)
+        # 2. 3D回転月 (自由移動)
+        self._draw_pure_crescent_logic(draw, self.moon_x, self.moon_y, ox, oy)
 
-        # 3. 水面反射 (シマー)
-        reflect_x = self.MOON_X + ox
-        for ry in range(48, self.height, 3):
-            shift = math.sin(ry * 0.2 + self.wave_phase * 2) * 5
-            sw = random.randint(1, 5)
-            draw.line([reflect_x + shift - sw, ry+oy, reflect_x + shift + sw, ry+oy], fill=255)
+        # 3. 水面反射 (月の位置に同期)
+        if self.moon_y < 45: # 地平線より上にある時のみ反射
+            reflect_x = self.moon_x + ox
+            for ry in range(48, self.height, 4):
+                shift = math.sin(ry * 0.2 + self.wave_phase * 2) * 4
+                sw = random.randint(1, 4)
+                draw.line([reflect_x + shift - sw, ry+oy, reflect_x + shift + sw, ry+oy], fill=255)
 
-        # 4. 波と船の高さ計算
+        # 4. 波と船
         wave_points = []
         ship_current_y = 45
         ship_slope = 0
-        for x in range(-10, self.width + 10, 3):
-            y = self._generate_storm_wave(x, self.wave_phase, self.wave_phase_fast, self.amplitude_factor)
+        for x in range(-5, self.width + 10, 3):
+            # 前回のStorm波生成ロジックを流用 (簡易化)
+            sine1 = math.sin(x * 0.07 + self.wave_phase)
+            wave1 = math.pow(abs(sine1), 0.55) * (14.0 if sine1 > 0 else -6.0)
+            wave2 = math.sin(x * 0.18 + self.wave_phase_fast) * 3
+            y = 46 + (wave1 + wave2) * self.amplitude_factor
+            
             wave_points.append((x+ox, y+oy))
             if abs(x - self.ship_x) < 3:
                 ship_current_y = y
-                y_next = self._generate_storm_wave(x + 3, self.wave_phase, self.wave_phase_fast, self.amplitude_factor)
+                # 勾配計算
+                s_n = math.sin((x+3) * 0.07 + self.wave_phase)
+                w_n = math.pow(abs(s_n), 0.55) * (14.0 if s_n > 0 else -6.0)
+                y_next = 46 + (w_n + math.sin((x+3) * 0.18 + self.wave_phase_fast) * 3) * self.amplitude_factor
                 ship_slope = (y_next - y) / 3.0
-            
-            # 激しい波頭の飛沫
-            if y < 38 and random.random() < 0.25:
-                self._spawn_spray(x+ox, y+oy, 1, heavy=True)
+                
+            if y < 40 and random.random() < 0.1:
+                self._spawn_spray(x+ox, y+oy, 1)
 
         if len(wave_points) > 1:
             draw.line(wave_points, fill=255, width=1)
 
-        # 5. 特大帆船の描画 (存在感アップ)
+        # 5. 大型帆船
         target_y = ship_current_y - 2
-        self.ship_y = self.ship_y * 0.4 + target_y * 0.6
-        if target_y - self.last_ship_y > 3: # 衝撃検知
-            self._spawn_spray(self.ship_x+ox, self.ship_y+oy, 5, heavy=True)
+        self.ship_y = self.ship_y * 0.5 + target_y * 0.5
+        if target_y - self.last_ship_y > 4:
+            self._spawn_spray(self.ship_x+ox, self.ship_y+oy, 3)
         self.last_ship_y = self.ship_y
-        self.ship_tilt = math.atan(ship_slope) * 1.8 # 傾斜も強調
+        self.ship_tilt = math.atan(ship_slope) * 1.6
 
         def r(px, py):
             s, c = math.sin(self.ship_tilt), math.cos(self.ship_tilt)
@@ -155,35 +213,16 @@ class BCNOFNeScreenSaver:
             return nx + ox, ny + oy
 
         cx, cy = self.ship_x, self.ship_y
-        # 巨大船体 (右を舳先に戻すバイ)
-        hull = [
-            r(cx-16, cy),   # 船尾 (左上)
-            r(cx+18, cy-1), # 舳先 (右上)
-            r(cx+14, cy+7), # 舳先 (右下)
-            r(cx-13, cy+7)  # 船尾 (左下)
-        ]
+        hull = [r(cx-14, cy), r(cx+16, cy-1), r(cx+13, cy+6), r(cx-12, cy+6)]
         draw.polygon(hull, outline=255, fill=0)
-        
-        # バランスよい帆とマスト (右向き・追い風バイ)
-        # メインマスト (中央)
-        draw.line(r(cx, cy) + r(cx, cy-20), fill=255)
-        draw.polygon([r(cx+1, cy-19), r(cx+12, cy-11), r(cx+1, cy-3)], outline=255)
-        # 前方マスト
-        draw.line(r(cx-8, cy) + r(cx-8, cy-13), fill=255)
-        draw.polygon([r(cx-7, cy-12), r(cx+1, cy-8), r(cx-7, cy-3)], outline=255)
-        
-        # 航海灯 (船尾＝左側に配置)
-        if self.frame_count % 10 < 7: draw.point(r(cx-15, cy+1), fill=255)
+        draw.line(r(cx, cy) + r(cx, cy-18), fill=255) 
+        draw.polygon([r(cx-1, cy-17), r(cx+7, cy-10), r(cx-1, cy-2)], outline=255)
+        if self.frame_count % 10 < 7: draw.point(r(cx-13, cy+1), fill=255)
 
-        # 6. 飛沫パーティクルの描画
-        for p in self.particles: 
-            draw.point((p["x"], p["y"]), fill=255)
-            # 少し軌跡を描いて躍動感を出す
-            if random.random() > 0.5:
-                draw.point((p["x"]-p["vx"]*0.5, p["y"]-p["vy"]*0.5), fill=255)
+        # 6. パーティクル
+        for p in self.particles: draw.point((p["x"], p["y"]), fill=255)
 
-        # 7. テキスト演出 (見切れないように内側へ配置)
-        if self.frame_count % 400 < 80:
-            text_x = 48 + ox # 80から48へ大幅に左へシフト
-            draw.text((text_x, 6+oy), "Crypto Ark", fill=255)
-            draw.text((text_x + 5, 16+oy), ":BCNOFNe", fill=255)
+        # 7. テキスト (たまに右上に)
+        if self.frame_count % 400 < 60:
+            draw.text((80+ox, 6+oy), "Crypto Ark", fill=255)
+            draw.text((85+ox, 16+oy), ":BCNOFNe", fill=255)
