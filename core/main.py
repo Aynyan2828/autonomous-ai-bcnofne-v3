@@ -853,7 +853,7 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
         await send_reply(payload.reply_token, "(AIは停止中です)")
         return
 
-    set_system_state(db, "ai_target_goal", f"対話中:{payload.text[:10]}")
+    set_system_state(db, "ai_target_goal", "思考中...")
 
     async def process_ai_reply():
         try:
@@ -878,9 +878,14 @@ async def receive_message(payload: MessagePayload, background_tasks: BackgroundT
                 variables=variables
             )
             
+            
+            # OLED表示を返答内容に更新 (改行をスペースに置換)
+            display_reply = reply_text.replace("\n", " ")[:100]
+            set_system_state(db, "ai_target_goal", f"返答:{display_reply}")
+            
             await send_reply(payload.reply_token, reply_text)
             await record_working_memory(f"Conversation", f"Master: {payload.text}\nAYN: {reply_text}")
-            set_system_state(db, "ai_target_goal", "待機中ばい")
+            # set_system_state(db, "ai_target_goal", "待機中ばい") # 返答を表示し続けるためコメントアウト
         except Exception as e:
             logger.error(f"LLM error: {e}")
             await send_reply(payload.reply_token, f"頭がボーッとしてうまく考えられんと... (エラー: {e})")
