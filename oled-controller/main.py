@@ -617,35 +617,45 @@ async def hardware_loop():
     global oled_mode, last_activity_ts
     setup_hardware()
     
+    last_db_update = 0
+    
     while True:
         try:
-            temp = get_cpu_temp()
-            load = psutil.cpu_percent()
+            now = time.time()
             
-            # 1. ファン制御 (DB不要)
-            control_fan(temp, load)
-            
-            # 2. OLED更新 (DBロック時は内部でキャッチしてキャッシュ描画)
-            db = SessionLocal()
-            try:
-                update_oled(db)
-            except Exception as e:
-                # update_oled内部で大抵キャッチされるが、念のためここでもガード
-                if "database is locked" not in str(e):
-                    logger.error(f"OLED: update_oled fatal error: {e}")
-            finally:
-                db.close()
+            # 1. 2秒に1回だけ重い処理（CPU負荷/DB/ファン制御）を実行
+            if now - last_db_update >= 2.0:
+                temp = get_cpu_temp()
+                load = psutil.cpu_percent()
+                control_fan(temp, load)
                 
-            # 3. アイドル判定 (DBエラーが起きてもこの判定は必ず通るバイ)
-            idle_sec = time.time() - last_activity_ts
+                db = SessionLocal()
+                try:
+                    # update_oledの中でDBからデータを引くのはこの周期の時だけにする
+                    update_oled(db)
+                except Exception as e:
+                    if "database is locked" not in str(e):
+                        logger.error(f"OLED: DB Update error: {e}")
+                finally:
+                    db.close()
+                last_db_update = now
+            else:
+                # DB更新がない時は、キャッシュ（Noneを渡す）で描画（スクリーンセーバー等）だけ更新
+                update_oled(None)
+            
+            # 2. アイドル判定
+            idle_sec = now - last_activity_ts
             if ENABLE_SCREENSAVER and oled_mode == "NORMAL" and idle_sec > SCREENSAVER_IDLE_SECONDS:
                 logger.info(f"OLED: Entering SCREENSAVER mode (Idle: {idle_sec:.0f}s)")
                 oled_mode = "SCREENSAVER"
 
-            await asyncio.sleep(2.0)
+            # 3. 超高速な描画サイクルのための短いスリープ (約20FPS)
+            # スクリーンセーバー中はより速く、通常時は少し抑えるなどの調整も可能
+            await asyncio.sleep(0.05)
+            
         except Exception as e:
             logger.error(f"Hardware loop error: {e}")
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(1.0)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
