@@ -103,10 +103,12 @@ LOGO_PATH = "/app/oled_128x64_resize_dither.png"
 
 def show_boot_animation():
     """Ship-like boot sequence animation with logo and progress bar."""
-    if not HARDWARE_AVAILABLE or not oled_display: return
+    if not HARDWARE_AVAILABLE or not oled_display:
+        return
+    
     logo = None
-    paths = [LOGO_PATH, "oled_128x64_resize_dither.png", "./oled-controller/oled_128x64_resize_dither.png"]
-    for p in paths:
+    paths_to_try = [LOGO_PATH, "oled_128x64_resize_dither.png", "./oled-controller/oled_128x64_resize_dither.png"]
+    for p in paths_to_try:
         if os.path.exists(p):
             try:
                 logo = Image.open(p).convert("1")
@@ -114,17 +116,27 @@ def show_boot_animation():
             except: pass
 
     checks = ["CPU TEMPERATURE", "I2C BUS STATUS", "FAN CONTROLLER", "DATABASE CONN", "NETWORK CONFIG", "BCNOFNe KERNEL "]
+    total_checks = len(checks)
+    
     for i, label in enumerate(checks):
+        if not oled_display: break
         image = logo.copy() if logo else Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
         draw = ImageDraw.Draw(image)
+        
+        # テキスト背景の黒塗り（元のロジック通り）
         draw.rectangle((0, 0, 110, 10), fill=0)
-        draw.text((0, 0), "--- SYSTEM CHECK ---", fill=255)
-        draw.rectangle((0, 12, 120, 21), fill=0)
-        draw.text((0, 12), f"[ OK ] {label}", fill=255)
+        draw.text((0, 0), "--- SYSTEM CHECK ---", font=ImageFont.load_default(), fill=255)
+        
+        y_pos = 12
+        draw.rectangle((0, y_pos, 120, y_pos + 9), fill=0)
+        draw.text((0, y_pos), f"[ OK ] {label}", font=ImageFont.load_default(), fill=255)
+            
+        # プログレスバー（元のロジック通り fill=0 を追加）
         bar_y, bar_h = 54, 8
-        draw.rectangle((0, bar_y, OLED_WIDTH-1, bar_y+bar_h), outline=255)
-        pw = int((i+1)/len(checks)*(OLED_WIDTH-4))
-        draw.rectangle((2, bar_y+2, 2+pw, bar_y+bar_h-2), fill=255)
+        draw.rectangle((0, bar_y, OLED_WIDTH - 1, bar_y + bar_h), outline=255, fill=0)
+        progress_w = int((i + 1) / total_checks * (OLED_WIDTH - 4))
+        draw.rectangle((2, bar_y + 2, 2 + progress_w, bar_y + bar_h - 2), fill=255)
+        
         oled_display.image(image)
         oled_display.show()
         time.sleep(0.5)
@@ -133,8 +145,8 @@ def show_boot_animation():
         image = logo.copy() if logo else Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
         draw = ImageDraw.Draw(image)
         draw.rectangle((10, 20, 118, 45), fill=0, outline=255)
-        draw.text((15, 25), "ALL SYSTEMS GREEN", fill=255)
-        draw.text((15, 35), "    OUTWARD BOUND", fill=255)
+        draw.text((15, 25), "ALL SYSTEMS GREEN", font=ImageFont.load_default(), fill=255)
+        draw.text((15, 35), "    OUTWARD BOUND", font=ImageFont.load_default(), fill=255)
         oled_display.image(image)
         oled_display.show()
         time.sleep(1.5)
@@ -152,8 +164,8 @@ def show_shutdown_animation():
         draw = ImageDraw.Draw(image)
         if i % 2 == 0:
             draw.rectangle((10, 20, 118, 45), fill=0, outline=255)
-            draw.text((15, 25), " RETURN TO PORT ", fill=255)
-            draw.text((15, 35), " SHUTTING DOWN  ", fill=255)
+            draw.text((15, 25), " RETURN TO PORT ", font=ImageFont.load_default(), fill=255)
+            draw.text((15, 35), " SHUTTING DOWN  ", font=ImageFont.load_default(), fill=255)
         oled_display.image(image)
         oled_display.show()
         time.sleep(0.5)
@@ -170,8 +182,8 @@ def show_shutdown_animation():
 
     image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
     draw = ImageDraw.Draw(image)
-    draw.text((10, 20), "safe shutdown .", fill=255)
-    draw.text((10, 35), "see you master", fill=255)
+    draw.text((10, 20), "safe shutdown .", font=ImageFont.load_default(), fill=255)
+    draw.text((10, 35), "see you master", font=ImageFont.load_default(), fill=255)
     oled_display.image(image)
     oled_display.show()
     time.sleep(2)
@@ -271,7 +283,6 @@ def update_oled(db: Session):
             update_oled.cache["ip"], update_oled.cache["ts_ip"] = h, t
         except: pass
 
-    c = update_oled.cache
     if oled_mode == "SCREENSAVER" and ENABLE_SCREENSAVER and screensaver:
         image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
         try:
@@ -282,6 +293,7 @@ def update_oled(db: Session):
         except: pass
         return
 
+    c = update_oled.cache
     temp = get_cpu_temp()
     score, _ = compute_mood(temp, c["ai_status"], c["ship_mode"])
     m_disp = SHIP_MODE_DISPLAY.get(c["ship_mode"], "SAIL")
@@ -297,9 +309,7 @@ def update_oled(db: Session):
     cur = {"stat":c["ai_status"], "mode":c["ship_mode"], "dest":new_dest, "msg":c["scroll"]}
     if cur != last_display_data:
         last_display_data, last_activity_ts = cur, now
-        if oled_mode != "NORMAL":
-            oled_mode = "NORMAL"
-            logger.info("OLED: Activity detected. Returning to NORMAL mode.")
+        if oled_mode != "NORMAL": oled_mode = "NORMAL"
 
     image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
     draw = ImageDraw.Draw(image)
