@@ -1,4 +1,4 @@
 from .router import get_llm_executor
 from .executor import LLMExecutor
 from .schemas import *
-from .types import TaskType
+from .llm_types import TaskType
