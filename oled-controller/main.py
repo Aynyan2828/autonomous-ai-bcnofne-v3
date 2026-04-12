@@ -488,20 +488,25 @@ def update_oled(db: Session):
     elif ai_status == "STOPPED":
         ai_face = "(-_-)"
 
-    # アクティビティ検知 (表示データに変化があればタイマーリセット)
+    # アクティビティ検知 (表示データに真に変化があればタイマーリセット)
     current_data = {
-        "ai_status": ai_status,
-        "ship_mode": ship_mode,
-        "goal": new_dest,
-        "scroll": new_scroll
+        "stat": ai_status,
+        "mode": ship_mode,
+        "dest": new_dest,
+        "msg": new_scroll
     }
     
     if current_data != last_display_data:
+        # 何が変化したか特定してログに出す (デバッグ用)
+        changes = [k for k, v in current_data.items() if v != last_display_data.get(k)]
         last_display_data = current_data
         last_activity_ts = time.time()
         if oled_mode != "NORMAL":
-            logger.info("OLED: Activity detected. Returning to NORMAL mode.")
+            logger.info(f"OLED: Activity detected ({', '.join(changes)}). Returning to NORMAL mode.")
             oled_mode = "NORMAL"
+        else:
+            # 頻繁にログが出過ぎないように、デバッグレベルで出力
+            logger.debug(f"OLED: Idle timer reset due to change in: {', '.join(changes)}")
 
     if oled_mode == "SCREENSAVER" and ENABLE_SCREENSAVER and screensaver:
         image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
