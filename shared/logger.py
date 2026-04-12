@@ -60,7 +60,9 @@ class ShipLogger:
                 }
                 await client.post(self.discord_url, json=payload, timeout=2.0)
             except Exception as e:
-                print(f"[LOGGER ERROR] Discord Fail: {e}")
+                # Discord gateway might be down, suppress to avoid log flooding
+                # print(f"[LOGGER ERROR] Discord Fail: {e}")
+                pass
 
     def _send_notification(self, level: str, message: str):
         """非同期ループの有無に応じて通知を送る処操"""
