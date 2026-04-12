@@ -102,18 +102,24 @@ ENABLE_SCREENSAVER = os.getenv("ENABLE_SCREENSAVER", "true").lower() == "true"
 LOGO_PATH = "/app/oled_128x64_resize_dither.png"
 
 def show_boot_animation():
+    """Ship-like boot sequence animation with logo and progress bar."""
     if not HARDWARE_AVAILABLE or not oled_display: return
     logo = None
-    if os.path.exists(LOGO_PATH):
-        try: logo = Image.open(LOGO_PATH).convert("1")
-        except: pass
+    paths = [LOGO_PATH, "oled_128x64_resize_dither.png", "./oled-controller/oled_128x64_resize_dither.png"]
+    for p in paths:
+        if os.path.exists(p):
+            try:
+                logo = Image.open(p).convert("1")
+                break
+            except: pass
 
-    checks = ["CPU TEMP", "I2C BUS", "FAN CTRL", "DB CONN", "NETWORK", "KERNEL"]
+    checks = ["CPU TEMPERATURE", "I2C BUS STATUS", "FAN CONTROLLER", "DATABASE CONN", "NETWORK CONFIG", "BCNOFNe KERNEL "]
     for i, label in enumerate(checks):
         image = logo.copy() if logo else Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
         draw = ImageDraw.Draw(image)
         draw.rectangle((0, 0, 110, 10), fill=0)
         draw.text((0, 0), "--- SYSTEM CHECK ---", fill=255)
+        draw.rectangle((0, 12, 120, 21), fill=0)
         draw.text((0, 12), f"[ OK ] {label}", fill=255)
         bar_y, bar_h = 54, 8
         draw.rectangle((0, bar_y, OLED_WIDTH-1, bar_y+bar_h), outline=255)
@@ -121,17 +127,54 @@ def show_boot_animation():
         draw.rectangle((2, bar_y+2, 2+pw, bar_y+bar_h-2), fill=255)
         oled_display.image(image)
         oled_display.show()
-        time.sleep(0.3)
+        time.sleep(0.5)
+    
+    if oled_display:
+        image = logo.copy() if logo else Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((10, 20, 118, 45), fill=0, outline=255)
+        draw.text((15, 25), "ALL SYSTEMS GREEN", fill=255)
+        draw.text((15, 35), "    OUTWARD BOUND", fill=255)
+        oled_display.image(image)
+        oled_display.show()
+        time.sleep(1.5)
 
 def show_shutdown_animation():
+    """Ship-like shutdown sequence animation (Return to port)."""
     if not HARDWARE_AVAILABLE or not oled_display: return
+    logo = None
+    if os.path.exists(LOGO_PATH):
+        try: logo = Image.open(LOGO_PATH).convert("1")
+        except: pass
+
+    for i in range(6):
+        image = logo.copy() if logo else Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+        draw = ImageDraw.Draw(image)
+        if i % 2 == 0:
+            draw.rectangle((10, 20, 118, 45), fill=0, outline=255)
+            draw.text((15, 25), " RETURN TO PORT ", fill=255)
+            draw.text((15, 35), " SHUTTING DOWN  ", fill=255)
+        oled_display.image(image)
+        oled_display.show()
+        time.sleep(0.5)
+
+    if logo:
+        image = logo.copy()
+        for y in range(0, OLED_HEIGHT // 2, 2):
+            draw = ImageDraw.Draw(image)
+            draw.line((0, y, OLED_WIDTH, y), fill=0)
+            draw.line((0, OLED_HEIGHT - 1 - y, OLED_WIDTH, OLED_HEIGHT - 1 - y), fill=0)
+            oled_display.image(image)
+            oled_display.show()
+            time.sleep(0.05)
+
     image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
     draw = ImageDraw.Draw(image)
     draw.text((10, 20), "safe shutdown .", fill=255)
     draw.text((10, 35), "see you master", fill=255)
     oled_display.image(image)
     oled_display.show()
-    time.sleep(1.5)
+    time.sleep(2)
     oled_display.fill(0)
     oled_display.show()
 
@@ -165,6 +208,9 @@ def control_fan(temp, load=0.0):
         try:
             fan_ctrl.update(temp, load)
             fan_status = fan_ctrl.get_status()
+            if fan_status["status"] != getattr(control_fan, "last_label", ""):
+                control_fan.last_label = fan_status["status"]
+                logger.debug(f"OLED/FAN: Status -> {fan_status['status']} ({temp:.1f}C)")
         except: pass
 
 def discover_ips():
@@ -175,7 +221,7 @@ def discover_ips():
                 if a.family == socket.AF_INET:
                     ip = a.address
                     if ip.startswith("100."): t = ip
-                    elif (ip.startswith("192.168.") or ip.startswith("10.")) and not ip.startswith("127."):
+                    elif (ip.startswith("192.168.") or ip.startswith("10.")) and not ip.startswith("172."):
                         if h == "???": h = ip
     except: pass
     return h, t
@@ -192,8 +238,11 @@ def compute_mood(temp: float, ai_status: str, ship_mode: str) -> tuple[int, str]
     score = 80
     if temp >= 75: score -= 35
     elif temp >= 65: score -= 20
+    elif 0 < temp <= 45: score += 5
     st = (ai_status or "").lower()
     if "error" in st or "stop" in st or ship_mode == "safe": score -= 25
+    elif "wait" in st: score -= 8
+    elif "run" in st: score += 2
     score = max(0, min(100, score))
     if score >= 85: f = "(^o^)"
     elif score >= 70: f = "(^_^)"
@@ -248,12 +297,17 @@ def update_oled(db: Session):
     cur = {"stat":c["ai_status"], "mode":c["ship_mode"], "dest":new_dest, "msg":c["scroll"]}
     if cur != last_display_data:
         last_display_data, last_activity_ts = cur, now
-        if oled_mode != "NORMAL": oled_mode = "NORMAL"
+        if oled_mode != "NORMAL":
+            oled_mode = "NORMAL"
+            logger.info("OLED: Activity detected. Returning to NORMAL mode.")
 
     image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
     draw = ImageDraw.Draw(image)
     if not hasattr(update_oled, "font"):
         update_oled.font = ImageFont.load_default()
+        for p in ["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"]:
+            if os.path.exists(p):
+                update_oled.font = ImageFont.truetype(p, 10); break
     f = update_oled.font
     ai_f = c["ai_face"]
     if score < 40 and temp >= 60: ai_f = "(x_x)"
