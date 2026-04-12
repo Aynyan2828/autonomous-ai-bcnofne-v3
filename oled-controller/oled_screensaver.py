@@ -213,3 +213,9 @@ class BCNOFNeScreenSaver:
         if int(now / 15) % 2 == 0 and (now % 15) < 3: # 15秒おきに3秒表示
             draw.text((70+ox, 6+oy), "Crypto Ark", fill=255)
             draw.text((75+ox, 16+oy), ":BCNOFNe", fill=255)
+    def _generate_storm_wave(self, x, phase, phase_fast, amplitude):
+        """波の高さを計算する共通メソッド"""
+        sine1 = math.sin(x * 0.07 + phase)
+        wave1 = math.pow(abs(sine1), 0.55) * (15.0 if sine1 > 0 else -6.0)
+        wave2 = math.sin(x * 0.18 + phase_fast) * 4
+        return self.HORIZON_Y + (wave1 + wave2) * amplitude

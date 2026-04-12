@@ -4,14 +4,14 @@ import time
 import asyncio
 import psutil
 import socket
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared import init_db
 from shared.database import SessionLocal
-from shared.models import SystemState, ShipMode, InternalStateHistory
+from shared.models import SystemState, InternalStateHistory
 from shared.logger import ShipLogger
 
 # データベース初期化
@@ -30,7 +30,6 @@ try:
     from PIL import Image, ImageDraw, ImageFont
     HARDWARE_AVAILABLE = True
 except ImportError:
-    # Try absolute import for local testing or different path structures
     try:
         import pigpio
         from fan_controller import FanController
@@ -41,84 +40,53 @@ except ImportError:
         from PIL import Image, ImageDraw, ImageFont
         HARDWARE_AVAILABLE = True
     except Exception as e:
-        import traceback
         HARDWARE_AVAILABLE = False
         print(f"[OLED/FAN] Hardware libraries not available. Running in stub mode. ({e})")
-        traceback.print_exc()
-except Exception as e:
-    HARDWARE_AVAILABLE = False
-    print(f"[OLED/FAN] Hardware error. ({e})")
 
 def clean_text(text: str) -> str:
-    """Keep printable characters including Japanese (UTF-8)."""
-    if not text:
-        return ""
-    # ASCII 制御文字以外は大体許可する
+    if not text: return ""
     return "".join(c for c in text if ord(c) >= 32 or c == '\n')
 
 app = FastAPI(title="BCNOFNe OLED & Fan Controller")
 
-# Configuration Constants
+# Configuration
 OLED_WIDTH = 128
 OLED_HEIGHT = 64
-FAN_PWM_PIN = 13 # Move from 12 to 13 to avoid conflict with RGB (GPIO 18) on PWM Channel 0
+FAN_PWM_PIN = 13
 FAN_TACH_PIN = 24
-TEMP_THRESHOLD_HIGH = 60.0 # 100% Duty
-TEMP_THRESHOLD_LOW = 40.0  # 30% Duty
+TEMP_THRESHOLD_HIGH = 60.0
+TEMP_THRESHOLD_LOW = 40.0
 
-# shipOS Mode Mapping (Naval Terms)
 SHIP_MODE_DISPLAY = {
-    "autonomous":  "SAIL  >===>",
-    "user_first":  "PORT  >===>",
-    "maintenance": "DOCK  >===>",
-    "power_save":  "ANCHOR>===>",
-    "safe":        "SOS   >===>",
-    "SAIL":        "SAIL  >===>",
-    "PORT":        "PORT  >===>",
-    "DOCK":        "DOCK  >===>",
-    "ANCHOR":      "ANCHOR>===>",
-    "SOS":         "SOS   >===>",
+    "autonomous": "SAIL  >===>", "user_first": "PORT  >===>",
+    "maintenance": "DOCK  >===>", "power_save": "ANCHOR>===>",
+    "safe": "SOS   >===>", "SAIL": "SAIL  >===>",
+    "PORT": "PORT  >===>", "DOCK": "DOCK  >===>",
+    "ANCHOR": "ANCHOR>===>", "SOS": "SOS   >===>",
 }
 
 SHIP_MODE_EMOJI = {
-    "autonomous":  "[~]",
-    "user_first":  "[P]",
-    "maintenance": "[M]",
-    "power_save":  "[z]",
-    "safe":        "[!]",
-    "SAIL":        "[~]",
-    "PORT":        "[P]",
-    "DOCK":        "[M]",
-    "ANCHOR":      "[z]",
-    "SOS":         "[!]",
+    "autonomous": "[~]", "user_first": "[P]", "maintenance": "[M]",
+    "power_save": "[z]", "safe": "[!]", "SAIL": "[~]",
+    "PORT": "[P]", "DOCK": "[M]", "ANCHOR": "[z]", "SOS": "[!]",
 }
 
-# AI State -> Faces
 AI_STATE_FACE = {
-    "Idle":          "(-_-)",
-    "Planning":      "( ..)phi",
-    "Acting":        "(o_o)",
-    "Moving Files":  "( ..)phi",
-    "Error":         "(x_x)",
-    "Wait":          "(o_o)",
-    "RUNNING":       "(o_o)",
-    "STOPPED":       "(x_x)",
+    "Idle": "(-_-)", "Planning": "( ..)phi", "Acting": "(o_o)",
+    "Moving Files": "( ..)phi", "Error": "(x_x)", "Wait": "(o_o)",
+    "RUNNING": "(o_o)", "STOPPED": "(x_x)",
 }
 
 INTERNAL_STATE_FACE = {
-    "CALM": "(^-^)",
-    "STORM": "(>_<)",
-    "TIRED": "(=_=)",
-    "FOCUSED": "(*_*)",
-    "CURIOUS": "(O_O)",
-    "RELIEVED": "(^o^)",
+    "CALM": "(^-^)", "STORM": "(>_<)", "TIRED": "(=_=)",
+    "FOCUSED": "(*_*)", "CURIOUS": "(O_O)", "RELIEVED": "(^o^)",
     "PROUD": "(`_`)"
 }
 
 # Runtime Variables
 fan_ctrl = None
 pi = None
-fan_status = {"duty": 0, "rpm": 0}
+fan_status = {"duty": 0, "rpm": 0, "status": "INITIALIZING"}
 oled_display = None
 scroll_message = ""
 scroll_pos = OLED_WIDTH
@@ -126,577 +94,219 @@ dest_scroll_message = ""
 dest_scroll_pos = OLED_WIDTH
 last_display_data = {}
 last_activity_ts = time.time()
-oled_mode = "NORMAL" # NORMAL, SCREENSAVER
+oled_mode = "NORMAL"
 screensaver = None
 
 SCREENSAVER_IDLE_SECONDS = int(os.getenv("SCREENSAVER_IDLE_SECONDS", "60"))
 ENABLE_SCREENSAVER = os.getenv("ENABLE_SCREENSAVER", "true").lower() == "true"
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 LOGO_PATH = "/app/oled_128x64_resize_dither.png"
 
 def show_boot_animation():
-    """Ship-like boot sequence animation with logo and progress bar."""
-    if not HARDWARE_AVAILABLE or not oled_display:
-        return
-    
-    # Load Logo
-    logo = None
-    paths_to_try = [LOGO_PATH, "oled_128x64_resize_dither.png", "./oled-controller/oled_128x64_resize_dither.png"]
-    
-    logger.info(f"OLED: Starting boot animation. Current DIR: {os.getcwd()}")
-    logger.info(f"OLED: Files in /app: {os.listdir('/app') if os.path.exists('/app') else 'N/A'}")
-
-    for p in paths_to_try:
-        if os.path.exists(p):
-            try:
-                logo = Image.open(p).convert("1")
-                logger.info(f"OLED: Successfully loaded logo from {p}")
-                break
-            except Exception as e:
-                logger.error(f"OLED: Failed to open logo at {p}: {e}")
-        else:
-            logger.info(f"OLED: Logo not found at {p}")
-
-    checks = [
-        "CPU TEMPERATURE",
-        "I2C BUS STATUS",
-        "FAN CONTROLLER",
-        "DATABASE CONN",
-        "NETWORK CONFIG",
-        "BCNOFNe KERNEL "
-    ]
-    
-    total_checks = len(checks)
-    for i, label in enumerate(checks):
-        if not oled_display:
-            break
-        
-        # 起動イメージの作成
-        if logo:
-            image = logo.copy()
-        else:
-            image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
-            
-        draw = ImageDraw.Draw(image)
-        
-        # テキストの視認性確保のために背景を少し黒く塗る
-        draw.rectangle((0, 0, 110, 10), fill=0)
-        draw.text((0, 0), "--- SYSTEM CHECK ---", font=ImageFont.load_default(), fill=255)
-        
-        # 最新のチェック項目を1つだけ出す（ロゴを隠しすぎないように）
-        y_pos = 12
-        draw.rectangle((0, y_pos, 120, y_pos + 9), fill=0)
-        draw.text((0, y_pos), f"[ OK ] {checks[i]}", font=ImageFont.load_default(), fill=255)
-            
-        # プログレスバー（画面下部）
-        bar_y = 54
-        bar_h = 8
-        draw.rectangle((0, bar_y, OLED_WIDTH - 1, bar_y + bar_h), outline=255, fill=0)
-        progress_w = int((i + 1) / total_checks * (OLED_WIDTH - 4))
-        draw.rectangle((2, bar_y + 2, 2 + progress_w, bar_y + bar_h - 2), fill=255)
-        
-        oled_display.image(image)
-        oled_display.show()
-        time.sleep(0.5)
-    
-    # Final ready message
-    if oled_display:
-        image = logo.copy() if logo else Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
-        draw = ImageDraw.Draw(image)
-        draw.rectangle((10, 20, 118, 45), fill=0, outline=255)
-        draw.text((15, 25), "ALL SYSTEMS GREEN", font=ImageFont.load_default(), fill=255)
-        draw.text((15, 35), "    OUTWARD BOUND", font=ImageFont.load_default(), fill=255)
-        oled_display.image(image)
-        oled_display.show()
-        time.sleep(1.5)
-
-def show_shutdown_animation():
-    """Ship-like shutdown sequence animation (Return to port)."""
-    if not HARDWARE_AVAILABLE or not oled_display:
-        return
-
+    if not HARDWARE_AVAILABLE or not oled_display: return
     logo = None
     if os.path.exists(LOGO_PATH):
-        try:
-            logo = Image.open(LOGO_PATH).convert("1")
-        except:
-            pass
+        try: logo = Image.open(LOGO_PATH).convert("1")
+        except: pass
 
-    # 1. 帰港メッセージを表示
-    for i in range(6):
+    checks = ["CPU TEMP", "I2C BUS", "FAN CTRL", "DB CONN", "NETWORK", "KERNEL"]
+    for i, label in enumerate(checks):
         image = logo.copy() if logo else Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
         draw = ImageDraw.Draw(image)
-        
-        if i % 2 == 0:
-            draw.rectangle((10, 20, 118, 45), fill=0, outline=255)
-            draw.text((15, 25), " RETURN TO PORT ", font=ImageFont.load_default(), fill=255)
-            draw.text((15, 35), " SHUTTING DOWN  ", font=ImageFont.load_default(), fill=255)
-            
+        draw.rectangle((0, 0, 110, 10), fill=0)
+        draw.text((0, 0), "--- SYSTEM CHECK ---", fill=255)
+        draw.text((0, 12), f"[ OK ] {label}", fill=255)
+        bar_y, bar_h = 54, 8
+        draw.rectangle((0, bar_y, OLED_WIDTH-1, bar_y+bar_h), outline=255)
+        pw = int((i+1)/len(checks)*(OLED_WIDTH-4))
+        draw.rectangle((2, bar_y+2, 2+pw, bar_y+bar_h-2), fill=255)
         oled_display.image(image)
         oled_display.show()
-        time.sleep(0.5)
+        time.sleep(0.3)
 
-    # 2. フェードアウト（上下から収束）
-    if logo:
-        image = logo.copy()
-        for y in range(0, OLED_HEIGHT // 2, 2):
-            draw = ImageDraw.Draw(image)
-            draw.line((0, y, OLED_WIDTH, y), fill=0)
-            draw.line((0, OLED_HEIGHT - 1 - y, OLED_WIDTH, OLED_HEIGHT - 1 - y), fill=0)
-            oled_display.image(image)
-            oled_display.show()
-            time.sleep(0.05)
-
-    # 3. 最終メッセージ
+def show_shutdown_animation():
+    if not HARDWARE_AVAILABLE or not oled_display: return
     image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
     draw = ImageDraw.Draw(image)
-    draw.text((10, 20), "safe shutdown .", font=ImageFont.load_default(), fill=255)
-    draw.text((10, 35), "see you master", font=ImageFont.load_default(), fill=255)
+    draw.text((10, 20), "safe shutdown .", fill=255)
+    draw.text((10, 35), "see you master", fill=255)
     oled_display.image(image)
     oled_display.show()
-    time.sleep(2)
-
+    time.sleep(1.5)
     oled_display.fill(0)
     oled_display.show()
 
 def setup_hardware():
-    global fan_ctrl, oled_display, pi
-    if not HARDWARE_AVAILABLE:
-        return
-
-    # pigpio Setup
+    global fan_ctrl, oled_display, pi, screensaver
+    if not HARDWARE_AVAILABLE: return
     try:
-        # Docker環境からホストの pigpiod に接続するための設定
-        pigpio_host = os.getenv("PIGPIO_ADDR", "localhost")
-        pi = pigpio.pi(pigpio_host)
-        
-        # もし localhost で接続失敗し、かつ環境変数が未設定なら、Gateway IPを動的取得して試行
-        if not pi.connected and pigpio_host == "localhost":
-            logger.info("OLED/FAN: localhost failed. Trying pure python socket bridge gateway...")
-            import socket
-            
-            # Try host.docker.internal first
-            try:
-                host_ip = socket.gethostbyname("host.docker.internal")
-                logger.info(f"OLED/FAN: Found host.docker.internal: {host_ip}")
-                pi = pigpio.pi(host_ip)
-            except Exception:
-                pass
-                
-            # Try bridging fallback
-            if not pi.connected:
-                try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    s.settimeout(1)
-                    s.connect(("8.8.8.8", 80))
-                    container_ip = s.getsockname()[0]
-                    s.close()
-                    gateway_ip = container_ip.rsplit('.', 1)[0] + '.1'
-                    
-                    logger.info(f"OLED/FAN: Found gateway IP guess: {gateway_ip}, retrying...")
-                    pi = pigpio.pi(gateway_ip)
-                except Exception as e:
-                    logger.warning(f"OLED/FAN: Failed to get gateway IP. ({e})")
-                
-            # それでもダメなら従来の固定IPフォールバック
-            if not pi.connected:
-                logger.info("OLED/FAN: Retrying pigpiod on 172.17.0.1 (Docker default bridge)...")
-                pi = pigpio.pi("172.17.0.1")
-
+        pi = pigpio.pi(os.getenv("PIGPIO_ADDR", "localhost"))
         if not pi.connected:
-            logger.warning("OLED/FAN: pigpiod not running or unreachable. Fan control will be stubbed.")
-        else:
+            pi = pigpio.pi("host.docker.internal")
+        if pi.connected:
             fan_ctrl = FanController(pi, pwm_pin=FAN_PWM_PIN, tach_pin=FAN_TACH_PIN)
-            logger.info(f"OLED/FAN: FanController initialized with pigpio on {pi._host}.")
-    except Exception as e:
-        logger.error(f"OLED/FAN: Failed to initialize pigpio/fan: {e}")
+    except: pass
 
-    # OLED Setup
     try:
         i2c = busio.I2C(board.SCL, board.SDA)
-        oled_display = adafruit_ssd1306.SSD1306_I2C(OLED_WIDTH, OLED_HEIGHT, i2c, addr=0x3C)
-        oled_display.fill(0)
-        oled_display.show()
-        
-        # Instantiate screensaver
-        global screensaver
+        oled_display = adafruit_ssd1306.SSD1306_I2C(OLED_WIDTH, OLED_HEIGHT, i2c)
         screensaver = BCNOFNeScreenSaver(OLED_WIDTH, OLED_HEIGHT)
-        
-        # Start animation
         show_boot_animation()
-    except Exception as e:
-        logger.error(f"Failed to initialize OLED: {e}")
-        oled_display = None
+    except: oled_display = None
 
 def get_cpu_temp():
     try:
         with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
-            temp = int(f.read()) / 1000.0
-            return temp
-    except:
-        return 0.0
+            return int(f.read()) / 1000.0
+    except: return 0.0
 
 def control_fan(temp, load=0.0):
     global fan_ctrl, fan_status
-    if not HARDWARE_AVAILABLE:
-        return
-
     if fan_ctrl:
         try:
             fan_ctrl.update(temp, load)
             fan_status = fan_ctrl.get_status()
-            # 状態変化時のみログを出力
-            if fan_status["status"] != getattr(control_fan, "last_label", ""):
-                control_fan.last_label = fan_status["status"]
-                logger.info(f"OLED/FAN: Status Changed -> {fan_status['status']} (Temp:{temp:.1f}C, Duty:{fan_status['duty']}%)")
-        except Exception as e:
-            logger.error(f"OLED/FAN: Fan control error: {e}")
+        except: pass
 
-def discover_ips() -> tuple[str, str]:
-    """Discover host and tailscale IPs directly from interfaces."""
-    host_ip = "???"
-    ts_ip = "???"
+def discover_ips():
+    h, t = "???", "???"
     try:
-        interfaces = psutil.net_if_addrs()
-        for interface, addrs in interfaces.items():
-            for addr in addrs:
-                if addr.family == socket.AF_INET:
-                    ip = addr.address
-                    # Tailscale (100.x.x.x)
-                    if ip.startswith("100."):
-                        ts_ip = ip
-                    # Private LAN (192.168.x.x or 10.x.x.x)
-                    elif (ip.startswith("192.168.") or ip.startswith("10.")) and not ip.startswith("172."):
-                        # 複数のIPがある場合は、最初に見つかったプライベートIPをホストIPとする
-                        if host_ip == "???":
-                            host_ip = ip
-        
-        # もしプライベートIPが見つからなければ、ループバック以外を適当に拾う
-        if host_ip == "???":
-            for interface, addrs in interfaces.items():
-                for addr in addrs:
-                    if addr.family == socket.AF_INET and not addr.address.startswith("127."):
-                        host_ip = addr.address
-                        break
-    except Exception as e:
-        logger.error(f"OLED: IP detection failed: {e}")
-        
-    return host_ip, ts_ip
+        for _, addrs in psutil.net_if_addrs().items():
+            for a in addrs:
+                if a.family == socket.AF_INET:
+                    ip = a.address
+                    if ip.startswith("100."): t = ip
+                    elif (ip.startswith("192.168.") or ip.startswith("10.")) and not ip.startswith("127."):
+                        if h == "???": h = ip
+    except: pass
+    return h, t
 
 def get_system_state_val(db: Session, key: str, default: str) -> str:
-    if db is None:
-        return default
-    # 別プロセス（core等）が書き込んだ最新の値を読むため、キャッシュを破棄してからクエリ
-    db.expire_all()
-    state = db.query(SystemState).filter_by(key=key).first()
-    return state.value if state else default
+    if not db: return default
+    try:
+        db.expire_all()
+        state = db.query(SystemState).filter_by(key=key).first()
+        return state.value if state else default
+    except: return default
 
 def compute_mood(temp: float, ai_status: str, ship_mode: str) -> tuple[int, str]:
-    """Simplified Mood calculation for OLED display (ASCII only)."""
     score = 80
-    
-    if temp >= 75:
-        score -= 35
-    elif temp >= 65:
-        score -= 20
-    elif 0 < temp <= 45:
-        score += 5
-        
+    if temp >= 75: score -= 35
+    elif temp >= 65: score -= 20
     st = (ai_status or "").lower()
-    if "error" in st or "stop" in st or ship_mode == "safe":
-        score -= 25
-    elif "wait" in st:
-        score -= 8
-    elif "run" in st:
-        score += 2
-
-    score = max(0, min(100, int(round(score))))
-    
-    if score >= 85: face = "(^o^)"
-    elif score >= 70: face = "(^_^)"
-    elif score >= 55: face = "(o_o)"
-    elif score >= 35: face = "(._.)"
-    else: face = "(x_x)" if temp >= 70 else "(>_<)"
-        
-    return score, face
+    if "error" in st or "stop" in st or ship_mode == "safe": score -= 25
+    score = max(0, min(100, score))
+    if score >= 85: f = "(^o^)"
+    elif score >= 70: f = "(^_^)"
+    elif score >= 55: f = "(o_o)"
+    elif score >= 35: f = "(._.)"
+    else: f = "(x_x)" if temp >= 70 else "(>_<)"
+    return score, f
 
 def update_oled(db: Session):
     global scroll_pos, scroll_message, dest_scroll_pos, dest_scroll_message
     global last_display_data, last_activity_ts, oled_mode, screensaver
-    if not HARDWARE_AVAILABLE or not oled_display:
-        return
+    if not HARDWARE_AVAILABLE or not oled_display: return
+    now = time.time()
+    if not hasattr(update_oled, "cache"):
+        update_oled.cache = {"ai_status":"RUNNING", "ship_mode":"autonomous", "ai_face":"(o_o)", "goal":"---", "scroll":"System Online", "ip":"???", "ts_ip":"???"}
 
-    # 1. データの準備 (DB状況に応じた分岐)
-    if db is None:
-        # キャッシュから読み込み
-        cache = getattr(update_oled, "cache", {})
-        ai_status = cache.get("ai_status", "RUNNING")
-        ship_mode = cache.get("ship_mode", "autonomous")
-        ai_face_from_state = cache.get("ai_face", "(o_o)")
-        goal_raw = cache.get("goal", "---")
-        scroll_raw = cache.get("scroll", "System Online")
-    else:
-        # DBからデータを取得
+    if db:
         try:
-            ai_status = get_system_state_val(db, "ai_status", "RUNNING")
-            ship_mode = get_system_state_val(db, "ship_mode", "autonomous")
-            
-            # Internal State を取得して顔文字に反映
-            latest_state = db.query(InternalStateHistory).order_by(InternalStateHistory.id.desc()).first()
-            if latest_state:
-                ai_face_from_state = INTERNAL_STATE_FACE.get(latest_state.state_name, "(o_o)")
-            else:
-                ai_face_from_state = "(^-^)"
-                
-            goal_raw = get_system_state_val(db, "ai_target_goal", "---")
-            scroll_raw = get_system_state_val(db, "oled_scroll_msg", "System Online")
-            
-            # 成功した場合はキャッシュを更新
-            if not hasattr(update_oled, "cache"):
-                update_oled.cache = {}
-            update_oled.cache.update({
-                "ai_status": ai_status,
-                "ship_mode": ship_mode,
-                "ai_face": ai_face_from_state,
-                "goal": goal_raw,
-                "scroll": scroll_raw
-            })
-        except Exception as e:
-            if "database is locked" not in str(e):
-                logger.error(f"OLED: DB error in update_oled: {e}")
-            
-            # キャッシュがなければデフォルト値を使用
-            cache = getattr(update_oled, "cache", {})
-            ai_status = cache.get("ai_status", "RUNNING")
-            ship_mode = cache.get("ship_mode", "autonomous")
-            ai_face_from_state = cache.get("ai_face", "(o_o)")
-            goal_raw = cache.get("goal", "---")
-            scroll_raw = cache.get("scroll", "System Online")
+            update_oled.cache["ai_status"] = get_system_state_val(db, "ai_status", "RUNNING")
+            update_oled.cache["ship_mode"] = get_system_state_val(db, "ship_mode", "autonomous")
+            latest = db.query(InternalStateHistory).order_by(InternalStateHistory.id.desc()).first()
+            update_oled.cache["ai_face"] = INTERNAL_STATE_FACE.get(latest.state_name, "(o_o)") if latest else "(^-^)"
+            update_oled.cache["goal"] = get_system_state_val(db, "ai_target_goal", "---")
+            update_oled.cache["scroll"] = get_system_state_val(db, "oled_scroll_msg", "System Online")
+            h, t = discover_ips()
+            update_oled.cache["ip"], update_oled.cache["ts_ip"] = h, t
+        except: pass
 
-    temp = get_cpu_temp()
-    
-    # Mood calculation
-    score, _ = compute_mood(temp, ai_status, ship_mode)
-    
-    # Mapping
-    mode_disp = SHIP_MODE_DISPLAY.get(ship_mode, "SAIL  >===>")
-    mode_emoji = SHIP_MODE_EMOJI.get(ship_mode, "[~]")
-    ai_face = AI_STATE_FACE.get(ai_status, "(-_-)")
-    
-    # Disk usage
-    try:
-        disk_pct = psutil.disk_usage('/').percent
-    except:
-        disk_pct = 0.0
-    
-    # Network info (DBがNoneの場合はキャッシュ優先)
-    d_host_ip, d_ts_ip = discover_ips()
-    if db is None:
-        cache = getattr(update_oled, "cache", {})
-        ip = cache.get("ip", d_host_ip)
-        ts_ip = cache.get("ts_ip", d_ts_ip)
-    else:
-        ip = d_host_ip if d_host_ip != "???" else get_system_state_val(db, "HOST_IP", "???")
-        ts_ip = d_ts_ip if d_ts_ip != "???" else get_system_state_val(db, "TAILSCALE_IP", "???")
-        # IPもキャッシュに保存
-        if not hasattr(update_oled, "cache"): update_oled.cache = {}
-        update_oled.cache.update({"ip": ip, "ts_ip": ts_ip})
-    
-    ip_scroll = f"LAN:{ip} TS:{ts_ip}"
-    
-    # Scroll message setup
-    new_scroll = clean_text(scroll_raw)
-    total_scroll = f"{new_scroll} | {ip_scroll}"
-    
-    if total_scroll != scroll_message:
-        scroll_message = total_scroll
-        scroll_pos = OLED_WIDTH
-
-    # DEST scroll message setup (AI goal - full text scroll)
-    new_dest = clean_text(goal_raw)
-    if new_dest != dest_scroll_message:
-        dest_scroll_message = new_dest
-        dest_scroll_pos = OLED_WIDTH
-    
-    ai_face = ai_face_from_state
-        
-    # ハードウェアエラー等による上書き（優先）
-    if score < 40 and temp >= 60:
-        ai_face = "(x_x)" 
-    elif ai_status == "STOPPED":
-        ai_face = "(-_-)"
-
-    # アクティビティ検知 (表示データに真に変化があればタイマーリセット)
-    current_data = {
-        "stat": ai_status,
-        "mode": ship_mode,
-        "dest": new_dest,
-        "msg": new_scroll
-    }
-    
-    if current_data != last_display_data:
-        # 何が変化したか特定してログに出す (デバッグ用)
-        changes = [k for k, v in current_data.items() if v != last_display_data.get(k)]
-        last_display_data = current_data
-        last_activity_ts = time.time()
-        if oled_mode != "NORMAL":
-            logger.info(f"OLED: Activity detected ({', '.join(changes)}). Returning to NORMAL mode.")
-            oled_mode = "NORMAL"
-        else:
-            # 頻繁にログが出過ぎないように、デバッグレベルで出力
-            logger.debug(f"OLED: Idle timer reset due to change in: {', '.join(changes)}")
-
+    c = update_oled.cache
     if oled_mode == "SCREENSAVER" and ENABLE_SCREENSAVER and screensaver:
         image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
-        draw = ImageDraw.Draw(image)
-        screensaver.update()
-        screensaver.draw(draw, font=font if 'font' in locals() else None)
-        oled_display.image(image)
-        oled_display.show()
+        try:
+            screensaver.update()
+            screensaver.draw(ImageDraw.Draw(image))
+            oled_display.image(image)
+            oled_display.show()
+        except: pass
         return
 
+    temp = get_cpu_temp()
+    score, _ = compute_mood(temp, c["ai_status"], c["ship_mode"])
+    m_disp = SHIP_MODE_DISPLAY.get(c["ship_mode"], "SAIL")
+    m_emoji = SHIP_MODE_EMOJI.get(c["ship_mode"], "[~]")
+    try: disk = psutil.disk_usage('/').percent
+    except: disk = 0.0
+    
+    total_scroll = f"{clean_text(c['scroll'])} | LAN:{c['ip']} TS:{c['ts_ip']}"
+    if total_scroll != scroll_message: scroll_message, scroll_pos = total_scroll, OLED_WIDTH
+    new_dest = clean_text(c["goal"])
+    if new_dest != dest_scroll_message: dest_scroll_message, dest_scroll_pos = new_dest, OLED_WIDTH
+
+    cur = {"stat":c["ai_status"], "mode":c["ship_mode"], "dest":new_dest, "msg":c["scroll"]}
+    if cur != last_display_data:
+        last_display_data, last_activity_ts = cur, now
+        if oled_mode != "NORMAL": oled_mode = "NORMAL"
 
     image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
     draw = ImageDraw.Draw(image)
-    
-    try:
-        # 日本語表示用フォントをロード (複数パスを試行)
-        jp_font_paths = [
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
-            "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ]
-        if not hasattr(update_oled, "font_cache"):
-            update_oled.font_cache = None
+    if not hasattr(update_oled, "font"):
+        update_oled.font = ImageFont.load_default()
+    f = update_oled.font
+    ai_f = c["ai_face"]
+    if score < 40 and temp >= 60: ai_f = "(x_x)"
+    elif c["ai_status"] == "STOPPED": ai_f = "(-_-)"
 
-        if update_oled.font_cache:
-            font = update_oled.font_cache
-        else:
-            font = None
-            for p in jp_font_paths:
-                if os.path.exists(p):
-                    font = ImageFont.truetype(p, 10)
-                    break
-            if not font:
-                font = ImageFont.load_default()
-                logger.warning("OLED: No TrueType font found, using default.")
-            else:
-                logger.info(f"OLED: Font loaded and cached from {p}")
-                update_oled.font_cache = font
-    except Exception as e:
-        logger.error(f"Failed to load font: {e}")
-        font = ImageFont.load_default()
-        
-    # ====== DRAWING ======
-    # Line 1: BCNOFNe: SAIL >===> [~]
-    draw.text((0, 0), clean_text(f"BCNOFNe:{mode_disp} {mode_emoji}"), font=font, fill=255)
-    
-    # Line 2: DEST: [Goal] (全文スクロール)
-    draw.text((dest_scroll_pos, 11), f"DEST:{dest_scroll_message}", font=font, fill=255)
-    
-    # Line 3: AI: (face)
-    draw.text((0, 22), f"AI: {ai_face}", font=font, fill=255)
-    
-    # Line 4: Hardwares (TEMP/DISK)
-    draw.text((0, 33), f"TEMP:{temp:.0f}C DISK:{disk_pct:.0f}%", font=font, fill=255)
-    
-    # Line 5: Fan status (Duty/RPM)
-    draw.text((0, 44), f"FAN:{fan_status['duty']}% RPM:{fan_status['rpm']}", font=font, fill=255)
-    
-    # Line 6: Scrolling message (LAN/TS IPs)
-    draw.text((scroll_pos, 55), scroll_message, font=font, fill=255)
+    draw.text((0, 0), f"BCN:{m_disp} {m_emoji}", font=f, fill=255)
+    draw.text((dest_scroll_pos, 11), f"DEST:{dest_scroll_message}", font=f, fill=255)
+    draw.text((0, 22), f"AI: {ai_f}", font=f, fill=255)
+    draw.text((0, 33), f"TEMP:{temp:.0f}C DISK:{disk:.0f}%", font=f, fill=255)
+    draw.text((0, 44), f"FAN:{fan_status['duty']}% RPM:{fan_status['rpm']}", font=f, fill=255)
+    draw.text((scroll_pos, 55), scroll_message, font=f, fill=255)
 
-    
-    # スクロール位置更新 (IP行)
     scroll_pos -= 5
-    max_len = len(scroll_message) * 7
-    if scroll_pos < -max_len:
-        scroll_pos = OLED_WIDTH
-
-    # スクロール位置更新 (DEST行)
+    if scroll_pos < -(len(scroll_message)*7): scroll_pos = OLED_WIDTH
     dest_scroll_pos -= 5
-    dest_max_len = len(dest_scroll_message) * 8  # 日本語文字は幅広
-    if dest_scroll_pos < -dest_max_len:
-        dest_scroll_pos = OLED_WIDTH
-        
+    if dest_scroll_pos < -(len(dest_scroll_message)*8): dest_scroll_pos = OLED_WIDTH
     oled_display.image(image)
     oled_display.show()
 
 async def hardware_loop():
     global oled_mode, last_activity_ts
     setup_hardware()
-    
-    last_db_update = 0
-    
+    last_db = 0
     while True:
         try:
             now = time.time()
-            
-            # 1. 2秒に1回だけ重い処理（CPU負荷/DB/ファン制御）を実行
-            if now - last_db_update >= 2.0:
-                temp = get_cpu_temp()
-                load = psutil.cpu_percent()
-                control_fan(temp, load)
-                
+            if now - last_db >= 2.0:
+                control_fan(get_cpu_temp(), psutil.cpu_percent())
                 db = SessionLocal()
-                try:
-                    # update_oledの中でDBからデータを引くのはこの周期の時だけにする
-                    update_oled(db)
-                except Exception as e:
-                    if "database is locked" not in str(e):
-                        logger.error(f"OLED: DB Update error: {e}")
-                finally:
-                    db.close()
-                last_db_update = now
-            else:
-                # DB更新がない時は、キャッシュ（Noneを渡す）で描画（スクリーンセーバー等）だけ更新
-                update_oled(None)
-            
-            # 2. アイドル判定
-            idle_sec = now - last_activity_ts
-            if ENABLE_SCREENSAVER and oled_mode == "NORMAL" and idle_sec > SCREENSAVER_IDLE_SECONDS:
-                logger.info(f"OLED: Entering SCREENSAVER mode (Idle: {idle_sec:.0f}s)")
-                oled_mode = "SCREENSAVER"
+                try: update_oled(db)
+                finally: db.close()
+                last_db = now
+            else: update_oled(None)
 
-            # 3. 描画サイクルのためのスリープ (0.5s = 秒間2回)
+            if ENABLE_SCREENSAVER and oled_mode == "NORMAL" and (now - last_activity_ts) > SCREENSAVER_IDLE_SECONDS:
+                logger.info("OLED: Entering SCREENSAVER mode")
+                oled_mode = "SCREENSAVER"
             await asyncio.sleep(0.5)
-            
         except Exception as e:
-            logger.error(f"Hardware loop error: {e}")
+            logger.error(f"Loop error: {e}")
             await asyncio.sleep(1.0)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     task = asyncio.create_task(hardware_loop())
     yield
-    # Shutdown
     task.cancel()
     if HARDWARE_AVAILABLE:
         show_shutdown_animation()
-        if fan_ctrl:
-            fan_ctrl.stop()
-        if pi:
-            pi.stop()
+        if pi: pi.stop()
 
 app.router.lifespan_context = lifespan
 
 @app.get("/health")
 def health_check():
-    return {
-        "status": "ok",
-        "service": "oled-controller",
-        "hardware_present": HARDWARE_AVAILABLE,
-        "fan_duty": fan_status.get("duty", 0),
-        "fan_rpm": fan_status.get("rpm", 0),
-        "cpu_temp": get_cpu_temp()
-    }
+    return {"status":"ok", "fan":fan_status, "temp":get_cpu_temp()}
