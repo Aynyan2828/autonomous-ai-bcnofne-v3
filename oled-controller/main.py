@@ -23,6 +23,7 @@ logger = ShipLogger("oled-controller")
 try:
     import pigpio
     from .fan_controller import FanController
+    from .oled_screensaver import BCNOFNeScreenSaver
     import board
     import busio
     import adafruit_ssd1306
@@ -33,6 +34,7 @@ except ImportError:
     try:
         import pigpio
         from fan_controller import FanController
+        from oled_screensaver import BCNOFNeScreenSaver
         import board
         import busio
         import adafruit_ssd1306
@@ -122,7 +124,13 @@ scroll_message = ""
 scroll_pos = OLED_WIDTH
 dest_scroll_message = ""
 dest_scroll_pos = OLED_WIDTH
-last_touch_ts = time.time()
+last_display_data = {}
+last_activity_ts = time.time()
+oled_mode = "NORMAL" # NORMAL, SCREENSAVER
+screensaver = None
+
+SCREENSAVER_IDLE_SECONDS = int(os.getenv("SCREENSAVER_IDLE_SECONDS", "60"))
+ENABLE_SCREENSAVER = os.getenv("ENABLE_SCREENSAVER", "true").lower() == "true"
 
 def get_db():
     db = SessionLocal()
@@ -316,6 +324,11 @@ def setup_hardware():
         oled_display = adafruit_ssd1306.SSD1306_I2C(OLED_WIDTH, OLED_HEIGHT, i2c, addr=0x3C)
         oled_display.fill(0)
         oled_display.show()
+        
+        # Instantiate screensaver
+        global screensaver
+        screensaver = BCNOFNeScreenSaver(OLED_WIDTH, OLED_HEIGHT)
+        
         # Start animation
         show_boot_animation()
     except Exception as e:
@@ -414,6 +427,7 @@ def compute_mood(temp: float, ai_status: str, ship_mode: str) -> tuple[int, str]
 
 def update_oled(db: Session):
     global scroll_pos, scroll_message, dest_scroll_pos, dest_scroll_message
+    global last_display_data, last_activity_ts, oled_mode, screensaver
     if not HARDWARE_AVAILABLE or not oled_display:
         return
 
@@ -473,6 +487,30 @@ def update_oled(db: Session):
         ai_face = "(x_x)" 
     elif ai_status == "STOPPED":
         ai_face = "(-_-)"
+
+    # アクティビティ検知 (表示データに変化があればタイマーリセット)
+    current_data = {
+        "ai_status": ai_status,
+        "ship_mode": ship_mode,
+        "goal": new_dest,
+        "scroll": new_scroll
+    }
+    
+    if current_data != last_display_data:
+        last_display_data = current_data
+        last_activity_ts = time.time()
+        if oled_mode != "NORMAL":
+            logger.info("OLED: Activity detected. Returning to NORMAL mode.")
+            oled_mode = "NORMAL"
+
+    if oled_mode == "SCREENSAVER" and ENABLE_SCREENSAVER and screensaver:
+        image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
+        draw = ImageDraw.Draw(image)
+        screensaver.update()
+        screensaver.draw(draw, font=font if 'font' in locals() else None)
+        oled_display.image(image)
+        oled_display.show()
+        return
 
 
     image = Image.new("1", (OLED_WIDTH, OLED_HEIGHT))
@@ -561,6 +599,12 @@ async def hardware_loop():
             finally:
                 db.close()
                 
+            # アイドル判定
+            idle_sec = time.time() - last_activity_ts
+            if ENABLE_SCREENSAVER and oled_mode == "NORMAL" and idle_sec > SCREENSAVER_IDLE_SECONDS:
+                logger.info(f"OLED: Entering SCREENSAVER mode (Idle: {idle_sec:.0f}s)")
+                oled_mode = "SCREENSAVER"
+
             await asyncio.sleep(2.0) # 2.0秒に緩和してDB負荷を軽減
         except Exception as e:
             logger.error(f"Hardware loop error: {e}")
