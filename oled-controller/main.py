@@ -614,7 +614,7 @@ def update_oled(db: Session):
     oled_display.show()
 
 async def hardware_loop():
-    global oled_mode
+    global oled_mode, last_activity_ts
     setup_hardware()
     
     while True:

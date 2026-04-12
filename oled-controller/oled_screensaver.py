@@ -35,24 +35,21 @@ class BCNOFNeScreenSaver:
         self.last_blackout_ts = time.time()
 
     def update(self):
-        """内部状態を更新する（描画前に呼ぶ）"""
+        """内部状態を更新する"""
         self.frame_count += 1
         
-        # 船の揺れ (少し大きめに揺らす)
-        self.ship_y_offset = math.sin(self.frame_count * 0.3) * 3
-        
-        # 波の位相 (バシャバシャ動くように速くする)
-        self.wave_phase += 1.2
+        # 波の位相 (ダイナミックに動かす)
+        self.wave_phase += 0.15
         
         # 星の点滅
         for i in range(len(self.stars)):
-            self.stars[i][2] += 0.1
+            self.stars[i][2] += 0.05
             
-        # 焼け防止オフセットの変更 (15秒ごと)
+        # 焼け防止オフセット
         now = time.time()
         if now - self.last_offset_change > 15:
-            self.burn_offset_x = random.randint(-2, 2)
-            self.burn_offset_y = random.randint(-1, 1)
+            self.burn_offset_x = random.randint(-4, 4)
+            self.burn_offset_y = random.randint(-2, 2)
             self.last_offset_change = now
             
         # 低頻度テキストの更新
@@ -64,57 +61,97 @@ class BCNOFNeScreenSaver:
         else:
             self.overlay_text = ""
 
-        # 暗転フラグの更新 (45秒ごとに1.5秒程度)
+        # 暗転管理
         cycle_time = now - self.last_blackout_ts
         if cycle_time > 45:
             self.is_blackout = True
-            if cycle_time > 47:
+            if cycle_time > 46.5:
                 self.is_blackout = False
                 self.last_blackout_ts = now
 
     def draw(self, draw: ImageDraw.Draw, font=None):
-        """提供されたImageDrawオブジェクトにスクリーンセーバーを描画する"""
+        """北斎風の大波と帆船を描画するバイ"""
         if self.is_blackout:
-            return # 何も描画しない（黒）
+            return
 
         ox = self.burn_offset_x
         oy = self.burn_offset_y
 
-        # 1. 星空を描画
+        # 1. 星空
         for x, y, phase in self.stars:
-            # 点滅演出：位相が0以上の時だけ描画
-            if math.sin(phase) > 0.5:
+            if math.sin(phase) > 0.3:
                 draw.point((x + ox, y + oy), fill=255)
 
-        # 2. 波を描画 (下部 - バシャバシャ感を出すために振幅と周波数を調整)
-        wave_y_base = 56
-        points = []
-        for x in range(0, self.width, 2): # より細かく描画
-            # 激しい波の表現：複数のサイン波を重ねて尖った動きに
-            y = wave_y_base + math.sin(x * 0.2 + self.wave_phase) * 3
-            y += math.sin(x * 0.4 + self.wave_phase * 1.5) * 2
-            points.append((x + ox, y + oy))
-        
-        if len(points) > 1:
-            draw.line(points, fill=255, width=1)
+        # 2. 北斎風の大波を描画
+        wave_points = []
+        ship_x = 50 + math.sin(self.wave_phase * 0.5) * 15 # 船のX位置もゆったり動く
+        ship_wave_y = 0
 
-        # 3. 船のシルエットを描画 (中央付近)
-        ship_x = 55 + math.cos(self.frame_count * 0.05) * 10 # 左右にも少し漂う
-        ship_y = 35 + self.ship_y_offset
+        for x in range(-10, self.width + 10, 2):
+            # 複数のサイン波を組み合わせて「うねり」を表現
+            # 大きなうねり + 細かい波
+            y_base = 48
+            wave1 = math.sin(x * 0.05 + self.wave_phase) * 8
+            wave2 = math.sin(x * 0.12 + self.wave_phase * 2) * 3
+            y = y_base + wave1 + wave2
+            
+            wave_points.append((x + ox, y + oy))
+            
+            # 船の位置の波の高さを記憶
+            if abs(x - ship_x) < 2:
+                ship_wave_y = y
+
+        # 波の描画 (塗りつぶし風に線を重ねるか、ポリゴンで描く)
+        if len(wave_points) > 1:
+            draw.line(wave_points, fill=255, width=1)
+            # 波の下を少しだけ埋める（奥行き感）
+            fill_points = wave_points + [(self.width+10+ox, self.height+oy), (-10+ox, self.height+oy)]
+            # 線の密度で表現（点描風）
+            for i in range(len(wave_points)-1):
+                px, py = wave_points[i]
+                if i % 4 == 0:
+                    draw.line((px, py, px, py + 3), fill=255)
+
+        # 3. かっこいい帆船シルエット
+        # 船は波の高さに合わせて上下し、少し傾ける
+        ship_y = ship_wave_y - 2 # 波の少し上に配置
+        tilt = math.cos(ship_x * 0.05 + self.wave_phase) * 0.2
         
-        # 船体 (台形)
-        draw.polygon([
-            (ship_x + ox, ship_y + oy),
-            (ship_x + 20 + ox, ship_y + oy),
-            (ship_x + 16 + ox, ship_y + 5 + oy),
-            (ship_x + 4 + ox, ship_y + 5 + oy)
-        ], outline=255, fill=0)
+        def rotate_point(px, py, cx, cy, angle):
+            s, c = math.sin(angle), math.cos(angle)
+            nx = (px - cx) * c - (py - cy) * s + cx
+            ny = (px - cx) * s + (py - cy) * c + cy
+            return nx + ox, ny + oy
+
+        cx, cy = ship_x, ship_y
+        # 船体 (大きめの帆船)
+        hull = [
+            rotate_point(ship_x - 12, ship_y, cx, cy, tilt),
+            rotate_point(ship_x + 14, ship_y - 2, cx, cy, tilt),
+            rotate_point(ship_x + 10, ship_y + 6, cx, cy, tilt),
+            rotate_point(ship_x - 10, ship_y + 6, cx, cy, tilt)
+        ]
+        draw.polygon(hull, outline=255, fill=0)
         
-        # マスト
-        draw.line((ship_x + 10 + ox, ship_y + oy, ship_x + 10 + ox, ship_y - 8 + oy), fill=255)
-        # 帆
-        draw.line((ship_x + 10 + ox, ship_y - 8 + oy, ship_x + 16 + ox, ship_y - 2 + oy), fill=255)
-        draw.line((ship_x + 10 + ox, ship_y - 2 + oy, ship_x + 16 + ox, ship_y - 2 + oy), fill=255)
+        # メインマストと大きな帆
+        draw.line(rotate_point(ship_x, ship_y, cx, cy, tilt) + 
+                  rotate_point(ship_x, ship_y - 18, cx, cy, tilt), fill=255)
+        sail1 = [
+            rotate_point(ship_x + 1, ship_y - 17, cx, cy, tilt),
+            rotate_point(ship_x + 12, ship_y - 10, cx, cy, tilt),
+            rotate_point(ship_x + 1, ship_y - 3, cx, cy, tilt)
+        ]
+        draw.polygon(sail1, outline=255, fill=0)
+
+        # 前方のマストと帆
+        draw.line(rotate_point(ship_x - 6, ship_y, cx, cy, tilt) + 
+                  rotate_point(ship_x - 6, ship_y - 12, cx, cy, tilt), fill=255)
+        sail2 = [
+            rotate_point(ship_x - 5, ship_y - 11, cx, cy, tilt),
+            rotate_point(ship_x + 2, ship_y - 8, cx, cy, tilt),
+            rotate_point(ship_x - 5, ship_y - 4, cx, cy, tilt)
+        ]
+        draw.polygon(sail2, outline=255, fill=0)
 
         # 4. オーバーレイテキスト
         if self.overlay_text:
