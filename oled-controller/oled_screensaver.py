@@ -59,6 +59,7 @@ class BCNOFNeScreenSaver:
         self.frame_count += 1
         
         # 1. 月の軌道更新 (1/4減速)
+        self.dt = dt
         self.moon_progress += self.moon_orbit_speed * dt
         if self.moon_progress > 1.6:
             self.moon_progress = 0.0
@@ -168,14 +169,25 @@ class BCNOFNeScreenSaver:
         if len(wave_points) > 1:
             draw.line(wave_points, fill=255, width=1)
 
-        # LAYER 6: 船
-        target_y = ship_current_y - 2
-        # なめらかな補間 (Lerp)
-        dt_factor = min((now - self.last_update_ts) * 10, 0.4) if hasattr(self, 'last_update_ts') else 0.4
+        # 6. 船 (波に深く沈ませ、左右にも揺らす)
+        # 左右のドリフトを追加
+        self.ship_x = 64 + math.sin(now * 0.4) * 10
+        
+        # 船の前後3点の平均高さを計算して、より安定して波に乗せる
+        y_center = ship_current_y
+        y_fore = self._generate_storm_wave(self.ship_x + 10, self.wave_phase, self.wave_phase_fast, self.amplitude_factor)
+        y_aft = self._generate_storm_wave(self.ship_x - 10, self.wave_phase, self.wave_phase_fast, self.amplitude_factor)
+        avg_wave_y = (y_center + y_fore + y_aft) / 3.0
+        
+        # 喫水線を下げて海に沈ませる (+2)
+        target_y = avg_wave_y + 2
+        
+        # 補間
+        dt_factor = min(self.dt * 8, 0.4)
         self.ship_y = self.ship_y * (1.0 - dt_factor) + target_y * dt_factor
         
         if target_y - self.last_ship_y > 4:
-            self._spawn_spray(self.ship_x+ox, self.ship_y+oy, 3)
+            self._spawn_spray(self.ship_x+ox, self.ship_y+oy, 4)
         self.last_ship_y = self.ship_y
         self.ship_tilt = math.atan(ship_slope) * 1.8
 
