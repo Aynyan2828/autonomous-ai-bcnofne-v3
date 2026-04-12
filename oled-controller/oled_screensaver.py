@@ -23,6 +23,7 @@ class BCNOFNeScreenSaver:
         self.wave_phase_fast = 0
         self.amplitude_factor = 1.0
         self.HORIZON_Y = 46
+        self.dt = 0.05 # 初期化
         
         # 船の状態
         self.ship_x = 64

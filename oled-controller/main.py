@@ -431,44 +431,52 @@ def update_oled(db: Session):
     if not HARDWARE_AVAILABLE or not oled_display:
         return
 
-    # データの取得 (DBロック時は前回のデータを使用)
-    try:
-        ai_status = get_system_state_val(db, "ai_status", "RUNNING")
-        ship_mode = get_system_state_val(db, "ship_mode", "autonomous")
-        
-        # Internal State を取得して顔文字に反映
-        latest_state = db.query(InternalStateHistory).order_by(InternalStateHistory.id.desc()).first()
-        if latest_state:
-            ai_face_from_state = INTERNAL_STATE_FACE.get(latest_state.state_name, "(o_o)")
-        else:
-            ai_face_from_state = "(^-^)"
-            
-        goal_raw = get_system_state_val(db, "ai_target_goal", "---")
-        scroll_raw = get_system_state_val(db, "oled_scroll_msg", "System Online")
-        
-        # 成功した場合はキャッシュを更新
-        if not hasattr(update_oled, "cache"):
-            update_oled.cache = {}
-        update_oled.cache.update({
-            "ai_status": ai_status,
-            "ship_mode": ship_mode,
-            "ai_face": ai_face_from_state,
-            "goal": goal_raw,
-            "scroll": scroll_raw
-        })
-    except Exception as e:
-        if "database is locked" in str(e):
-            logger.debug("OLED: DB locked, using cached data for this frame.")
-        else:
-            logger.error(f"OLED: DB error in update_oled: {e}")
-        
-        # キャッシュがなければデフォルト値を使用
+    # 1. データの準備 (DB状況に応じた分岐)
+    if db is None:
+        # キャッシュから読み込み
         cache = getattr(update_oled, "cache", {})
         ai_status = cache.get("ai_status", "RUNNING")
         ship_mode = cache.get("ship_mode", "autonomous")
         ai_face_from_state = cache.get("ai_face", "(o_o)")
         goal_raw = cache.get("goal", "---")
         scroll_raw = cache.get("scroll", "System Online")
+    else:
+        # DBからデータを取得
+        try:
+            ai_status = get_system_state_val(db, "ai_status", "RUNNING")
+            ship_mode = get_system_state_val(db, "ship_mode", "autonomous")
+            
+            # Internal State を取得して顔文字に反映
+            latest_state = db.query(InternalStateHistory).order_by(InternalStateHistory.id.desc()).first()
+            if latest_state:
+                ai_face_from_state = INTERNAL_STATE_FACE.get(latest_state.state_name, "(o_o)")
+            else:
+                ai_face_from_state = "(^-^)"
+                
+            goal_raw = get_system_state_val(db, "ai_target_goal", "---")
+            scroll_raw = get_system_state_val(db, "oled_scroll_msg", "System Online")
+            
+            # 成功した場合はキャッシュを更新
+            if not hasattr(update_oled, "cache"):
+                update_oled.cache = {}
+            update_oled.cache.update({
+                "ai_status": ai_status,
+                "ship_mode": ship_mode,
+                "ai_face": ai_face_from_state,
+                "goal": goal_raw,
+                "scroll": scroll_raw
+            })
+        except Exception as e:
+            if "database is locked" not in str(e):
+                logger.error(f"OLED: DB error in update_oled: {e}")
+            
+            # キャッシュがなければデフォルト値を使用
+            cache = getattr(update_oled, "cache", {})
+            ai_status = cache.get("ai_status", "RUNNING")
+            ship_mode = cache.get("ship_mode", "autonomous")
+            ai_face_from_state = cache.get("ai_face", "(o_o)")
+            goal_raw = cache.get("goal", "---")
+            scroll_raw = cache.get("scroll", "System Online")
 
     temp = get_cpu_temp()
     
