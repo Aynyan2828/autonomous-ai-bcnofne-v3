@@ -391,6 +391,8 @@ def discover_ips() -> tuple[str, str]:
     return host_ip, ts_ip
 
 def get_system_state_val(db: Session, key: str, default: str) -> str:
+    if db is None:
+        return default
     # 別プロセス（core等）が書き込んだ最新の値を読むため、キャッシュを破棄してからクエリ
     db.expire_all()
     state = db.query(SystemState).filter_by(key=key).first()
@@ -494,10 +496,18 @@ def update_oled(db: Session):
     except:
         disk_pct = 0.0
     
-    # Network info
+    # Network info (DBがNoneの場合はキャッシュ優先)
     d_host_ip, d_ts_ip = discover_ips()
-    ip = d_host_ip if d_host_ip != "???" else get_system_state_val(db, "HOST_IP", "???")
-    ts_ip = d_ts_ip if d_ts_ip != "???" else get_system_state_val(db, "TAILSCALE_IP", "???")
+    if db is None:
+        cache = getattr(update_oled, "cache", {})
+        ip = cache.get("ip", d_host_ip)
+        ts_ip = cache.get("ts_ip", d_ts_ip)
+    else:
+        ip = d_host_ip if d_host_ip != "???" else get_system_state_val(db, "HOST_IP", "???")
+        ts_ip = d_ts_ip if d_ts_ip != "???" else get_system_state_val(db, "TAILSCALE_IP", "???")
+        # IPもキャッシュに保存
+        if not hasattr(update_oled, "cache"): update_oled.cache = {}
+        update_oled.cache.update({"ip": ip, "ts_ip": ts_ip})
     
     ip_scroll = f"LAN:{ip} TS:{ts_ip}"
     
@@ -657,9 +667,8 @@ async def hardware_loop():
                 logger.info(f"OLED: Entering SCREENSAVER mode (Idle: {idle_sec:.0f}s)")
                 oled_mode = "SCREENSAVER"
 
-            # 3. 超高速な描画サイクルのための短いスリープ (約20FPS)
-            # スクリーンセーバー中はより速く、通常時は少し抑えるなどの調整も可能
-            await asyncio.sleep(0.05)
+            # 3. 描画サイクルのためのスリープ (0.5s = 秒間2回)
+            await asyncio.sleep(0.5)
             
         except Exception as e:
             logger.error(f"Hardware loop error: {e}")
