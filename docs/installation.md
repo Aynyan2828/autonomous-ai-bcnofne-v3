@@ -23,6 +23,37 @@ Also, the basic policy for AI's automatic changes is not direct push to main, bu
 
 ---
 
+## LLM (Ollama) の設定 (Windows ホスト利用)
+
+BCNOFNe は Windows PC 上で動作する Ollama を利用するように構成可能です。
+
+### 1. Windows Ollama の外部アクセス許可
+デフォルトでは Ollama は `localhost` のみ受け付けます。外部 (Docker や他の機器) から接続するには、環境変数を設定して再起動する必要があります。
+
+1. Windows のシステム環境変数に `OLLAMA_HOST=0.0.0.0` を追加します。
+2. Ollama アプリを完全に終了し、再度起動します。
+3. Windows ファイアウォールで TCP ポート `11434` の受信を許可します。
+
+### 2. BCNOFNe 側の設定 (.env)
+`.env` ファイルで以下の項目を設定します。
+
+```env
+AI_PROVIDER_MODE=local_preferred
+OLLAMA_BASE_URL=http://<WINDOWS_IP>:11434
+```
+
+### 3. 疎通確認
+以下のコマンドで接続テストが可能です。
+```bash
+docker exec -it shipos-core python llm/health.py
+```
+またはホスト側から:
+```bash
+curl http://<WINDOWS_IP>:11434/api/tags
+```
+
+---
+
 ## Installation Steps / インストール手順
 
 まず、GitHub でこのリポジトリを自身のフォークとしてコピーしてください。

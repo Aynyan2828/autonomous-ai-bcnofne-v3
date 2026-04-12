@@ -1,11 +1,15 @@
-from __future__ import annotations
-
-import logging
+import os
 import asyncio
 import time
+import logging
 from typing import Any, Type, Dict, Optional
+from contextvars import ContextVar
 
 from pydantic import BaseModel, ValidationError
+
+# 現在のリクエストで使用された最終的なプロバイダーを保持する
+# これにより、上位レイヤー（LINE送信等）でどのAIが使われたか判断可能にする
+used_provider_var: ContextVar[Optional[str]] = ContextVar("used_provider", default=None)
 
 from llm.prompt_loader import PromptLoader
 from llm.json_repair import parse_or_none
@@ -48,6 +52,15 @@ class LLMExecutor:
         model = router.get_model(task_type)
         provider = await self._get_provider(router)
         
+        provider_mode = os.getenv("AI_PROVIDER_MODE", "local_preferred").lower()
+        
+        # openai_only モード時は強制的に OpenAI プロバイダーへ切り替え
+        if provider_mode == "openai_only" and provider.provider_type != "openai":
+            from .factory import get_provider
+            provider = await get_provider("openai")
+            model = "gpt-4o-mini"
+            logger.info(f"[AI_PROVIDER] mode=openai_only, switched to openai")
+
         messages = [
             {"role": "system", "content": prompts["system"]},
             {"role": "user", "content": prompts["user"]}
@@ -59,43 +72,67 @@ class LLMExecutor:
                 messages=messages,
                 task_type=task_type
             )
-            # 成功したら、もしフォールバック中やった場合はモードを元に戻す（再試行ベース）
+            # 成功時の復帰チェック
             from llm.status import record_mode_switch, _get_state
             db = SessionLocal()
             current_active = _get_state(db, "active_ai_mode", provider.provider_type)
             if current_active == "openai" and provider.provider_type != "openai":
                  record_mode_switch(db, "openai", provider.provider_type, f"Recovered from {task_type}")
             db.close()
+            
+            # 使用したプロバイダーを記録
+            used_provider_var.set(provider.provider_type)
             return res
         except Exception as e:
-            if LLMConfig.get_global("fallback_enabled", True) and provider.provider_type != "openai":
-                logger.warning(f"Task {task_type} failed on {provider.provider_type}. Falling back to OpenAI. Error: {e}")
+            # フォールバック判定
+            can_fallback = (
+                provider_mode == "local_preferred" or 
+                (provider_mode != "local_only" and LLMConfig.get_global("fallback_enabled", True))
+            )
+            
+            if can_fallback and provider.provider_type != "openai":
+                fallback_reason = str(e)[:150]
+                logger.warning(f"[AI_FALLBACK] from={provider.provider_type} to=openai reason={fallback_reason}")
+                
                 from llm.status import record_mode_switch
                 db = SessionLocal()
-                record_mode_switch(db, provider.provider_type, "openai", f"Fallback due to {task_type} error: {str(e)[:100]}")
+                record_mode_switch(db, provider.provider_type, "openai", f"Fallback due to {task_type}: {fallback_reason}")
                 db.close()
 
                 from .factory import get_provider
                 fallback_provider = await get_provider("openai")
-                return await fallback_provider.generate_text(
-                    model="gpt-4o-mini", # 固定または設定から
+                fallback_model = router.get_fallback_model(task_type)
+                
+                res = await fallback_provider.generate_text(
+                    model=fallback_model,
                     messages=messages,
                     task_type=task_type
                 )
+                # フォールバック後のプロバイダーを記録
+                used_provider_var.set("openai")
+                return res
+            
+            # フォールバック不可、または既に OpenAI で失敗している場合
+            logger.error(f"[AI_ERROR] provider={provider.provider_type} mode={provider_mode} task={task_type} error={e}")
             raise
 
     async def execute_json(
         self,
         task_type: str,
         variables: dict[str, Any],
-        schema: Type[BaseModel] = None, # スキーマなし（Dict）も許容
+        schema: Type[BaseModel] = None,
     ) -> Any:
         prompts = self.prompt_loader.get_task_prompts(task_type, variables)
         router = await self._get_router()
         model = router.get_model(task_type)
         provider = await self._get_provider(router)
         
-        # 7B向けにJSON出力のヒントを強化
+        provider_mode = os.getenv("AI_PROVIDER_MODE", "local_preferred").lower()
+        if provider_mode == "openai_only" and provider.provider_type != "openai":
+            from .factory import get_provider
+            provider = await get_provider("openai")
+            model = "gpt-4o-mini"
+
         user_prompt = prompts["user"]
         if "JSON" not in user_prompt.upper():
             user_prompt += "\n\nIMPORTANT: Output valid JSON only."
@@ -105,7 +142,6 @@ class LLMExecutor:
             {"role": "user", "content": user_prompt}
         ]
  
-        from llm.status import record_mode_switch, _get_state
         raw = ""
         try:
             raw = await provider.generate_text(
@@ -113,27 +149,40 @@ class LLMExecutor:
                 messages=messages,
                 task_type=task_type
             )
-            # 成功時の復帰チェック
+            from llm.status import record_mode_switch, _get_state
             db = SessionLocal()
             current_active = _get_state(db, "active_ai_mode", provider.provider_type)
             if current_active == "openai" and provider.provider_type != "openai":
-                 record_mode_switch(db, "openai", provider.provider_type, f"Recovered from JSON task {task_type}")
+                 record_mode_switch(db, "openai", provider.provider_type, f"Recovered from JSON {task_type}")
             db.close()
+            # プロバイダーを記録
+            used_provider_var.set(provider.provider_type)
         except Exception as e:
-            if LLMConfig.get_global("fallback_enabled", True) and provider.provider_type != "openai":
-                logger.warning(f"JSON Task {task_type} failed on {provider.provider_type}. Falling back to OpenAI.")
+            can_fallback = (
+                provider_mode == "local_preferred" or 
+                (provider_mode != "local_only" and LLMConfig.get_global("fallback_enabled", True))
+            )
+
+            if can_fallback and provider.provider_type != "openai":
+                fallback_reason = str(e)[:150]
+                logger.warning(f"[AI_FALLBACK] from={provider.provider_type} to=openai reason={fallback_reason} (JSON Task)")
+                
                 db = SessionLocal()
-                record_mode_switch(db, provider.provider_type, "openai", f"Fallback due to JSON {task_type} error: {str(e)[:100]}")
+                record_mode_switch(db, provider.provider_type, "openai", f"Fallback due to JSON {task_type}: {fallback_reason}")
                 db.close()
 
                 from .factory import get_provider
                 fallback_provider = await get_provider("openai")
+                fallback_model = router.get_fallback_model(task_type)
                 raw = await fallback_provider.generate_text(
-                    model="gpt-4o-mini",
+                    model=fallback_model,
                     messages=messages,
                     task_type=task_type
                 )
+                # フォールバック後のプロバイダーを記録
+                used_provider_var.set("openai")
             else:
+                logger.error(f"[AI_ERROR] provider={provider.provider_type} mode={provider_mode} json_task={task_type} error={e}")
                 raise
 
         parsed = parse_or_none(raw)

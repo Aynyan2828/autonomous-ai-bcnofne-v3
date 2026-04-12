@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from contextlib import asynccontextmanager
 from llm import get_llm_executor
+from llm.executor import used_provider_var
+
 AI_NAME = os.getenv("AI_NAME", "AYN")
 AI_USER_NAME = os.getenv("AI_USER_NAME", "マスター")
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "aynyan-secret-2828")
@@ -36,6 +38,12 @@ init_db()
 
 # --- Helpers ---
 async def send_reply(reply_token: str, text: str):
+    # プロバイダー情報の注釈を追加
+    provider = used_provider_var.get()
+    if provider:
+        footer = "\n\n(Local AI)" if provider == "ollama" else "\n\n(OpenAI Fallback)"
+        text += footer
+
     async with httpx.AsyncClient() as client:
         try:
             await client.post(
@@ -47,6 +55,12 @@ async def send_reply(reply_token: str, text: str):
             print(f"Reply error: {e}")
 
 async def send_push(user_id: str, text: str):
+    # プロバイダー情報の注釈を追加
+    provider = used_provider_var.get()
+    if provider:
+        footer = "\n\n(Local AI)" if provider == "ollama" else "\n\n(OpenAI Fallback)"
+        text += footer
+
     async with httpx.AsyncClient() as client:
         try:
             await client.post(
