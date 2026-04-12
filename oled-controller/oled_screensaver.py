@@ -10,7 +10,6 @@ class BCNOFNeScreenSaver:
         self.frame_count = 0
         
         # 定数
-        self.HORIZON_Y = 40
         self.LOGO_X = 24
         self.LOGO_Y = 16
         
@@ -94,14 +93,19 @@ class BCNOFNeScreenSaver:
                     "life": random.randint(6, 12)
                 })
 
-    def _draw_sharp_logo(self, draw, x, y, ox, oy):
-        """三日月ロゴの描画"""
-        draw.arc([x-12+ox, y-12+oy, x+12+ox, y+12+oy], 30, 330, fill=255, width=1)
-        draw.arc([x-8+ox, y-12+oy, x+14+ox, y+12+oy], 60, 300, fill=0, width=2)
-        # ロゴ内部の方舟
+    def _draw_crescent_logo(self, draw, x, y, ox, oy):
+        """はっきりとした美しい三日月ロゴの描画"""
+        # 三日月の外側 (細めのライン)
+        draw.arc([x-14+ox, y-14+oy, x+14+ox, y+14+oy], 40, 320, fill=255, width=1)
+        # 三日月の内側 (消し込みを工夫して鋭い三日月に)
+        draw.arc([x-9+ox, y-14+oy, x+16+ox, y+14+oy], 60, 300, fill=0, width=3)
+        
+        # ロゴ内部の方舟 (船体はシンプルに)
         draw.line([x-2+ox, y+1+oy, x+4+ox, y+1+oy], fill=255)
-        draw.line([x+ox, y+1+oy, x+ox, y-5+oy], fill=255)
-        draw.polygon([(x+ox, y-5+oy), (x+4+ox, y-1+oy), (x+ox, y-1+oy)], outline=255)
+        # 象徴的なマスト
+        draw.line([x+ox, y+1+oy, x+ox, y-6+oy], fill=255)
+        # 帆 (三角形)
+        draw.polygon([(x+ox, y-6+oy), (x+5+ox, y-1+oy), (x+ox, y-1+oy)], outline=255)
 
     def draw(self, draw: ImageDraw.Draw, font=None):
         if self.is_blackout: return
@@ -112,17 +116,17 @@ class BCNOFNeScreenSaver:
             if math.sin(s["p"] + self.frame_count * 0.03) > 0.5:
                 draw.point((s["x"]+ox, s["y"]+oy), fill=255)
 
-        # 2. ロゴ
-        self._draw_sharp_logo(draw, self.LOGO_X, self.LOGO_Y, ox, oy)
+        # 2. ロゴ (三日月重視)
+        self._draw_crescent_logo(draw, self.LOGO_X, self.LOGO_Y, ox, oy)
 
-        # 3. 水面反射 (ストームVer - 断片化)
+        # 3. 水面反射 (シマー)
         reflect_x = self.LOGO_X + ox
         for ry in range(48, self.height, 3):
             shift = math.sin(ry * 0.2 + self.wave_phase * 2) * 4
             sw = random.randint(1, 4)
             draw.line([reflect_x + shift - sw, ry+oy, reflect_x + shift + sw, ry+oy], fill=255)
 
-        # 4. 波と船の計算
+        # 4. 波と船の高さ計算
         wave_points = []
         ship_current_y = 45
         ship_slope = 0
@@ -154,22 +158,22 @@ class BCNOFNeScreenSaver:
             return nx + ox, ny + oy
 
         cx, cy = self.ship_x, self.ship_y
-        # 船体 (一回り大きく)
+        # 船体
         hull = [r(cx-12, cy), r(cx+14, cy-1), r(cx+11, cy+5), r(cx-10, cy+5)]
         draw.polygon(hull, outline=255, fill=0)
-        # 2本のマスト
-        draw.line(r(cx-2, cy) + r(cx-2, cy-12), fill=255) # メイン
-        draw.line(r(cx+5, cy) + r(cx+5, cy-8), fill=255)  # サブ
-        # 帆
-        draw.polygon([r(cx-1, cy-11), r(cx+6, cy-6), r(cx-1, cy-2)], outline=255)
-        draw.polygon([r(cx+6, cy-7), r(cx+11, cy-4), r(cx+6, cy-2)], outline=255)
+        # 2本のマストと帆
+        draw.line(r(cx-2, cy) + r(cx-2, cy-14), fill=255) 
+        draw.line(r(cx+5, cy) + r(cx+5, cy-9), fill=255)
+        draw.polygon([r(cx-1, cy-13), r(cx+6, cy-7), r(cx-1, cy-2)], outline=255)
+        draw.polygon([r(cx+6, cy-8), r(cx+11, cy-5), r(cx+6, cy-2)], outline=255)
         # 航海灯
         if self.frame_count % 10 < 7: draw.point(r(cx-11, cy+1), fill=255)
 
         # 6. パーティクル
         for p in self.particles: draw.point((p["x"], p["y"]), fill=255)
 
-        # 7. テキスト (Crypto Ark : BCNOFNe)
-        # 海の深い位置に読みやすく配置
-        draw.text((60+ox, 50+oy), "Crypto Ark :", fill=255)
-        draw.text((65+ox, 57+oy), "BCNOFNe", fill=255)
+        # 7. テキスト演出 (たまに右上に)
+        if self.frame_count % 400 < 60:
+            # 右上にフェードインっぽく表示 (ドワーフ風)
+            draw.text((80+ox, 6+oy), "Crypto Ark", fill=255)
+            draw.text((85+ox, 16+oy), ":BCNOFNe", fill=255)
